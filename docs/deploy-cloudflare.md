@@ -43,6 +43,8 @@ npx wrangler d1 execute ivos --remote --env production --command "UPDATE users S
 
 ## 4. First deploy (no logins yet)
 
+**Done on 19 Oct 2026** via GitHub Actions: the Worker `avos` is live at `https://avos.shajianandan.workers.dev` (version `d3b1d06c`). Every later push to the working branch redeploys automatically.
+
 Two ways. **A** needs nothing on your computer and is what later deploys use too.
 
 **A. From GitHub Actions (recommended).** The repository carries `.github/workflows/deploy.yml`, which runs the tests, builds the web app, applies any new D1 migrations and deploys the Worker on every push to the working branch.
