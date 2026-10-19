@@ -1,0 +1,122 @@
+# One-off: create the Cloudflare Access applications for AVOS (step 6 of docs/deploy-cloudflare.md).
+# Idempotent — re-running finds existing objects by name and only prints their values.
+# Token needs, in addition to the deploy permissions:
+#   Account · Access: Organizations, Identity Providers, and Groups · Edit
+#   Account · Access: Apps and Policies · Edit
+name: Access setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      team_name:
+        description: "Zero Trust team name (creates <team>.cloudflareaccess.com if the account has none yet)"
+        required: false
+        default: "meadowsvarkala"
+
+jobs:
+  access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      HOSTNAME: avos.shajianandan.com
+      TEAM_NAME: ${{ github.event.inputs.team_name }}
+    steps:
+      - name: Configure Access
+        run: |
+          set -euo pipefail
+          api() { curl -sS --fail-with-body -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: application/json" "$@"; }
+          base="https://api.cloudflare.com/client/v4"
+
+          if [ -z "$CF_ACCOUNT_ID" ]; then
+            CF_ACCOUNT_ID=$(api "$base/accounts?per_page=5" | jq -r '.result[0].id')
+          fi
+          echo "account: $CF_ACCOUNT_ID"
+
+          # 1. Zero Trust organisation (team domain)
+          org=$(api "$base/accounts/$CF_ACCOUNT_ID/access/organizations" || true)
+          team_domain=$(echo "$org" | jq -r '.result.auth_domain // empty')
+          if [ -z "$team_domain" ]; then
+            echo "No Zero Trust organisation yet; creating team '$TEAM_NAME'"
+            org=$(api -X POST "$base/accounts/$CF_ACCOUNT_ID/access/organizations" \
+              --data "{\"name\":\"AVOS\",\"auth_domain\":\"$TEAM_NAME.cloudflareaccess.com\",\"is_ui_read_only\":false}")
+            team_domain=$(echo "$org" | jq -r '.result.auth_domain')
+          fi
+          echo "team domain: $team_domain"
+
+          # 2. One-time PIN login method
+          idps=$(api "$base/accounts/$CF_ACCOUNT_ID/access/identity_providers")
+          if ! echo "$idps" | jq -e '.result[] | select(.type=="onetimepin")' >/dev/null; then
+            echo "Adding One-time PIN login"
+            api -X POST "$base/accounts/$CF_ACCOUNT_ID/access/identity_providers" \
+              --data '{"name":"One-time PIN","type":"onetimepin","config":{}}' >/dev/null
+          fi
+
+          # 3. Applications
+          apps=$(api "$base/accounts/$CF_ACCOUNT_ID/access/apps?per_page=100")
+          app_id=$(echo "$apps" | jq -r '.result[] | select(.name=="AVOS") | .id' | head -1)
+          if [ -z "$app_id" ]; then
+            echo "Creating application AVOS on $HOSTNAME"
+            created=$(api -X POST "$base/accounts/$CF_ACCOUNT_ID/access/apps" --data @- <<JSON
+          {
+            "name": "AVOS",
+            "type": "self_hosted",
+            "domain": "$HOSTNAME",
+            "self_hosted_domains": ["$HOSTNAME"],
+            "session_duration": "24h",
+            "app_launcher_visible": true,
+            "auto_redirect_to_identity": false,
+            "policies": [
+              {
+                "name": "Team",
+                "decision": "allow",
+                "include": [
+                  {"email": {"email": "shajianandan@gmail.com"}},
+                  {"email": {"email": "bookings@meadowsvarkala.com"}},
+                  {"email": {"email": "meadowsvarkala@gmail.com"}},
+                  {"email": {"email": "trupti@truvic.co.in"}},
+                  {"email": {"email": "shubham.kandalkar@gmail.com"}}
+                ]
+              }
+            ]
+          }
+          JSON
+          )
+            app_id=$(echo "$created" | jq -r '.result.id')
+          fi
+          aud=$(api "$base/accounts/$CF_ACCOUNT_ID/access/apps/$app_id" | jq -r '.result.aud')
+          echo "AVOS app id: $app_id"
+
+          pub_id=$(echo "$apps" | jq -r '.result[] | select(.name=="AVOS public") | .id' | head -1)
+          if [ -z "$pub_id" ]; then
+            echo "Creating bypass application AVOS public for /hooks and /api/health"
+            api -X POST "$base/accounts/$CF_ACCOUNT_ID/access/apps" --data @- >/dev/null <<JSON
+          {
+            "name": "AVOS public",
+            "type": "self_hosted",
+            "domain": "$HOSTNAME/hooks",
+            "self_hosted_domains": ["$HOSTNAME/hooks", "$HOSTNAME/api/health"],
+            "session_duration": "24h",
+            "app_launcher_visible": false,
+            "policies": [
+              { "name": "Public endpoints", "decision": "bypass", "include": [ {"everyone": {}} ] }
+            ]
+          }
+          JSON
+          fi
+
+          echo "::notice title=ACCESS_TEAM_DOMAIN::$team_domain"
+          echo "::notice title=ACCESS_AUD::$aud"
+          {
+            echo "## Access configured"
+            echo ""
+            echo "| Var | Value |"
+            echo "|-----|-------|"
+            echo "| ACCESS_TEAM_DOMAIN | \`$team_domain\` |"
+            echo "| ACCESS_AUD | \`$aud\` |"
+            echo ""
+            echo "Put these into \`env.production.vars\` in \`wrangler.jsonc\` and push to deploy."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "ACCESS_TEAM_DOMAIN=$team_domain"
+          echo "ACCESS_AUD=$aud"
