@@ -152,3 +152,34 @@ Start single-tenant with `property_id` everywhere. For the first few dozen custo
 3. Does Booking.com deduct TCS and TDS from the payout, and is the commission base ex-GST for every channel (F5).
 4. Does the property take hotel-collect OTA bookings today (F5).
 5. Who sees bank debits during reconciliation (F7).
+
+---
+
+## 6. What was built (status after the first build)
+
+The repository now holds a working Cloudflare Workers + D1 implementation. Each finding above maps to code:
+
+| Finding | Implementation |
+|---------|----------------|
+| F1 inventory | `room_nights` table, PK (property, room, night); holds expire by cron; `/bookings/availability` grid; every booking path goes through `createBooking` |
+| F2 GST | `domain/gst.ts`: slab per room-night from the declared tariff, threshold inclusive, no GST without a GSTIN; invoice prints "GST not applicable" until registered; GST sheet shows advances for future stays |
+| F3 approval by exception | `domain/tariff.ts decideApproval`; on-tariff direct and parsed OTA bookings auto-approve (audited); exceptions create an `approvals` row and notify the revenue desk |
+| F4 fees once | gateway fee expense created with the payment and voided with it; reconcile tier 3 adds a `fee_variance` line only; settlement expenses created on Mark settled and voided on Undo |
+| F5 payout formula | `domain/settlement.ts` with per-channel commission/fee/TCS/TDS bases; `statutory_credits` feed the GST sheet; a hotel-collect channel is seeded |
+| F6 cash ledger | `money_accounts` (bank, cash, petty cash, gateway) and `transfers`; balances computed per account; top-ups are transfers |
+| F7 role wall on reconcile | revenue desk sees credits only; debits are accepted by owner/CA (403 otherwise) |
+| F8 lead expiries | cron: hold expiry releases inventory and returns the lead to quoted; quote expiry → lost with reason `expired` |
+| F9 guest identity | guests keyed by normalised phone; leads, bookings and inbox approvals reuse them |
+| F10 cancellation in v1 | `cancelled` / `no_show` statuses release inventory and open a refund approval; refund execution issues the credit note |
+| F11 period lock | `assertPeriodOpen` on every dated write (HTTP 423), binding every role including the owner |
+| F13 numbering | `sequences` upsert in the same batch; `MV/26-27/001`, `MV/CN/26-27/001` |
+| F14 backups | packs (summary JSON + CSV registers) stored in R2 per version; unlock → re-lock produces a revised pack |
+
+Tests: 30 automated (domain + the full Lead → CA flow over HTTP with role walls), plus `scripts/ui-walk.mjs` which drives every screen for every role in headless Chromium.
+
+### Still open for Shaji and the CA
+
+1. GSTIN: enter it under Settings once registered; invoices and the filing sheet switch on automatically.
+2. Channel TCS/TDS percentages: set from the first OTA statement that shows deductions.
+3. Email Routing and the lead hooks need DNS and the Meta app review; the Inbox paste box covers the gap.
+4. Reconciliation of hotel-collect OTA commission invoices is handled as a bank expense matched at tier 1/2; confirm this matches the CA's preference.

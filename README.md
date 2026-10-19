@@ -1,0 +1,58 @@
+# IVOS — Independent Villa Operating System
+
+Books-first operations for an independent villa: leads, bookings, front desk, collections, invoices, tasks, petty cash, OTA payouts, bank reconciliation, month close and the GST filing sheet — one Cloudflare Worker, one D1 database, one R2 bucket.
+
+Pilot property: Meadows Varkala (4 rooms). Every table carries `property_id`, so the SaaS turn is configuration, not migration.
+
+## Stack
+
+| Layer | Choice |
+|-------|--------|
+| API | Cloudflare Workers · [Hono](https://hono.dev) · TypeScript |
+| Books | D1 (SQLite). Money is integer paise. Multi-row writes are one `batch()` (one transaction). |
+| Files | R2 (bill photos, invoice PDFs, month-close packs) served only through the role-checked API |
+| Inbox | Email Routing → Email Worker (`postal-mime`) parses STAAH / SwiftBook / Airpay mail |
+| Nudges | Cron Trigger every 5 min: hold & quote expiry, 15/60-minute lead nudges |
+| Auth | Cloudflare Access in front; the Access JWT's email is looked up in `users`. Role walls are enforced per API route. |
+| UI | Preact + Vite PWA served as Worker static assets; quick capture is offline-first with idempotency keys |
+
+## Run locally
+
+```sh
+npm install --legacy-peer-deps
+npm run db:migrate:local
+npm run db:seed:local            # Meadows Varkala: users, rooms, tariff card, channels, money accounts
+npm run build:web
+npm run dev                      # http://localhost:8787
+```
+
+Outside production, pick a seeded user with the `x-dev-user` header or the user switcher in the top bar (`DEV_USER_EMAIL` in `wrangler.jsonc` is the default). In production only the Access JWT is accepted.
+
+```sh
+npm test                         # domain tests + the Lead → CA flow against an isolated D1
+npm run typecheck
+```
+
+## Deploy
+
+1. `npx wrangler d1 create ivos` and put the id in `wrangler.jsonc`; `npx wrangler r2 bucket create ivos-files`.
+2. `npm run db:migrate:remote && npm run db:seed:remote` (edit `seed/meadows-varkala.sql` first: real emails, GSTIN when registered).
+3. Put a Cloudflare Access application in front of the Worker's hostname; set `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `APP_ENV=production`, `INBOX_PROPERTY_ID=prop_meadows` as vars and `HOOK_SECRET` as a secret.
+4. `npm run deploy`.
+5. Email Routing: create `inbox@<your-domain>` → this Worker, then auto-forward STAAH / SwiftBook / Airpay mail from the current mailbox to it. Until then, paste emails into the Inbox screen; same parser, same audit.
+6. Lead hooks: website form posts to `/hooks/leads/website?key=<HOOK_SECRET>`; Meta Lead Ads webhook at `/hooks/leads/meta` (verify token = `HOOK_SECRET`).
+7. Use the Workers Paid plan from go-live: free-tier D1 limits now fail queries once exceeded.
+
+## The rules the code enforces
+
+- **Inventory.** `room_nights` has one row per room per night; a Hold or a booking occupies it, the primary key makes a double booking impossible, holds expire by cron.
+- **GST per room-night.** The slab comes from the declared tariff (≤ threshold → 5 % no ITC, above → 18 %), computed per night, and no GST at all until the property has a GSTIN. Invoices say so.
+- **Approval by exception.** On-tariff direct bookings and parsed OTA reservations approve themselves (audited); off-tariff, oversize or manual-rate bookings wait for the revenue desk.
+- **Fees once.** A gateway fee is created with its payment at the contracted rate and voided with it. Reconciliation may add a variance line, never a second fee. Settlement expenses are created on Mark settled and removed by Undo.
+- **Payout formula.** `received = gross − commission − payment fee − TCS − TDS`, every rate and base from the channel row; TCS/TDS post as recoverable credits for the GST sheet and 26AS.
+- **Cash ledger.** Bank, cash in hand, petty cash and the gateway clearing account; deposits and top-ups are transfers, never expenses. Who holds the money records its movements.
+- **Period lock.** Any write dated inside a locked month is refused (HTTP 423) for every role, the owner included. Lock stores pack v1 in R2; unlock → re-lock stores v2 "revised".
+- **Sequential numbers.** Invoices `MV/26-27/001` and credit notes `MV/CN/26-27/001` per property per financial year, allocated atomically; invoices are never deleted, only credited.
+- **Audit.** Every mutation writes an `audit_log` row (who, when, before, after) in the same batch.
+
+See `docs/ivos-process-and-d1-review.md` for the process review that led here.

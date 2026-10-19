@@ -1,0 +1,1 @@
+{ "name": "IVOS", "short_name": "IVOS", "start_url": "/", "display": "standalone", "background_color": "#F4F2EB", "theme_color": "#14453A", "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
