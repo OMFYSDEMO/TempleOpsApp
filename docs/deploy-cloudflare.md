@@ -33,7 +33,7 @@ npx wrangler r2 bucket create avos-files
 
 The bucket `avos-files` and a D1 database already exist in the account (created 19 Oct 2026). The database is still *named* `ivos` (D1 databases cannot be renamed; the name is internal and never shown to users) and `wrangler.jsonc` already carries its id `a34a52c8-60bf-4940-9606-8b64512a7cbb`, so skip the two create commands. If you would rather have the database named `avos`, run `npx wrangler d1 create avos`, put the new id in **both** places in `wrangler.jsonc`, change `database_name` to `avos` in `wrangler.jsonc` and the four `db:*` scripts in `package.json`, and delete the old one with `npx wrangler d1 delete ivos`.
 
-**Already done on 19 Oct 2026:** the schema (`0001_init.sql`) and the pilot seed were applied to the live database and the migration is recorded, so `npm run db:migrate:remote` reports nothing to apply. The five users still carry placeholder `@meadowsvarkala.example` emails. Replace them with the real login addresses (the Access login email must match exactly), either as the owner under **Settings & users** once you can sign in, or directly:
+**Already done on 19 Oct 2026:** the schema (`0001_init.sql`) and the pilot seed were applied to the live database and the migration is recorded, so `npm run db:migrate:remote` reports nothing to apply. The five users carry the real login addresses (set 19 Oct 2026; they must match the Access login emails exactly). To change one later, use **Settings & users** as the owner, or directly:
 
 ```sh
 npx wrangler d1 execute ivos --remote --env production --command "UPDATE users SET email='you@example.com' WHERE id='usr_shaji'"
@@ -65,7 +65,14 @@ Access gives you Google / one-time-PIN logins for up to 50 users at no cost, and
    - Application name: `AVOS`
    - **Add public hostname**: `avos.YOUR-DOMAIN` (leave path empty)
    - Session duration: `24 hours` is sensible for a front desk tablet.
-4. **Add a policy**: name `Team`, action **Allow**, include **Emails** and list the five team emails you put in the seed file. Save the application.
+4. **Add a policy**: name `Team`, action **Allow**, include **Emails** and list the five login addresses (these are already in the live `users` table):
+   - `shajianandan@gmail.com` (owner)
+   - `bookings@meadowsvarkala.com` (sales)
+   - `meadowsvarkala@gmail.com` (property manager)
+   - `trupti@truvic.co.in` (revenue)
+   - `shubham.kandalkar@gmail.com` (CA)
+
+   Save the application.
 5. Open the application again: the **Overview** tab shows the **Application Audience (AUD) Tag**. Copy it.
 6. **Bypass for the lead hooks.** Website and Meta webhooks cannot log in, so add a second application:
    **Add an application → Self-hosted**, name `AVOS hooks`, public hostname `avos.YOUR-DOMAIN` with path `hooks`, policy action **Bypass**, include **Everyone**. (Those endpoints are protected by `HOOK_SECRET` instead, step 9.)

@@ -3,11 +3,11 @@ INSERT OR IGNORE INTO properties (id, name, legal_name, address, gstin, state_co
 VALUES ('prop_meadows', 'Meadows Varkala', 'Meadows Varkala', 'Varkala, Kerala', NULL, '32', 'MV', 1, 4);
 
 INSERT OR IGNORE INTO users (id, property_id, email, name, role) VALUES
- ('usr_shaji',  'prop_meadows', 'shaji@meadowsvarkala.example',  'Shaji',  'owner'),
- ('usr_prachi', 'prop_meadows', 'prachi@meadowsvarkala.example', 'Prachi', 'sales'),
- ('usr_sindhu', 'prop_meadows', 'sindhu@meadowsvarkala.example', 'Sindhu', 'property'),
- ('usr_trupti', 'prop_meadows', 'trupti@meadowsvarkala.example', 'Trupti', 'revenue'),
- ('usr_ca',     'prop_meadows', 'ca@meadowsvarkala.example',     'CA',     'accountant');
+ ('usr_shaji',  'prop_meadows', 'shajianandan@gmail.com', 'Shaji', 'owner'),
+ ('usr_prachi', 'prop_meadows', 'bookings@meadowsvarkala.com', 'Prachi', 'sales'),
+ ('usr_sindhu', 'prop_meadows', 'meadowsvarkala@gmail.com', 'Sindhu', 'property'),
+ ('usr_trupti', 'prop_meadows', 'trupti@truvic.co.in', 'Trupti', 'revenue'),
+ ('usr_ca',     'prop_meadows', 'shubham.kandalkar@gmail.com', 'Shubham Kandalkar', 'accountant');
 
 INSERT OR IGNORE INTO locations (id, property_id, kind, code, name, sort) VALUES
  ('loc_r1', 'prop_meadows', 'room', 'R1', 'Deluxe', 1),
