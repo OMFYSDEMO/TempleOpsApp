@@ -1,0 +1,31 @@
+# One-off migration helper: exports the legacy AVOS Books Worker (code, bindings) and its KV data so the
+# bookings can be migrated into AVOS. Run on demand (Actions → Export AVOS Books → Run workflow).
+# Writes the export to the branch `avosbooks-export` under migration/avosbooks-export/.
+name: Export AVOS Books
+
+on:
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Export worker and KV
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash scripts/export-avosbooks.sh migration/avosbooks-export
+
+      - name: Commit export to branch avosbooks-export
+        run: |
+          git config user.name "avos-export"
+          git config user.email "avos-export@users.noreply.github.com"
+          git checkout -B avosbooks-export
+          git add -f migration/avosbooks-export
+          git commit -m "Export of legacy AVOS Books data ($(date -u +%Y-%m-%dT%H:%MZ))" || echo "nothing to commit"
+          git push -f origin avosbooks-export
