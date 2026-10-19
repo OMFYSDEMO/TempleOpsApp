@@ -20,13 +20,15 @@ const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
  */
 export async function resolveEmail(req: Request, env: Env): Promise<string | null> {
   const jwt = req.headers.get("Cf-Access-Jwt-Assertion");
-  if (env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD) {
+  if (env.ACCESS_TEAM_DOMAIN) {
+    // Access mode: the token must be signed by this team's keys and issued by this team.
+    // The audience is checked when ACCESS_AUD is configured; with one application per team it may be left blank.
     if (!jwt) return null;
     const issuer = `https://${env.ACCESS_TEAM_DOMAIN}`;
     let jwks = jwksCache.get(issuer);
     if (!jwks) { jwks = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`)); jwksCache.set(issuer, jwks); }
     try {
-      const { payload } = await jwtVerify(jwt, jwks, { issuer, audience: env.ACCESS_AUD });
+      const { payload } = await jwtVerify(jwt, jwks, { issuer, ...(env.ACCESS_AUD ? { audience: env.ACCESS_AUD } : {}) });
       return typeof payload.email === "string" ? payload.email.toLowerCase() : null;
     } catch { return null; }
   }

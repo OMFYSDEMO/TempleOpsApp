@@ -29,7 +29,7 @@
   },
 
   // Production: deploy with `npm run deploy` (= wrangler deploy --env production).
-  // Fill ACCESS_TEAM_DOMAIN and ACCESS_AUD from the Access application (docs/deploy-cloudflare.md, step 6).
+  // ACCESS_TEAM_DOMAIN pins the Zero Trust team whose logins are trusted; ACCESS_AUD (optional) pins one application.
   // HOOK_SECRET is a secret: `npx wrangler secret put HOOK_SECRET --env production`.
   "env": {
     "production": {
@@ -49,8 +49,8 @@
       "workers_dev": true,
       "vars": {
         "APP_ENV": "production",
-        "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com",
-        "ACCESS_AUD": "REPLACE_WITH_AUD_TAG",
+        "ACCESS_TEAM_DOMAIN": "meadowsvarkala.cloudflareaccess.com",
+        "ACCESS_AUD": "",
         "DEV_USER_EMAIL": "",
         "INBOX_PROPERTY_ID": "prop_meadows"
       }
