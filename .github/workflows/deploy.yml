@@ -1,0 +1,49 @@
+# Deploys AVOS to Cloudflare on every push to the working branch, or on demand (Actions → Deploy → Run workflow).
+# Needs two repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN  — token with Workers Scripts:Edit, D1:Edit, Workers R2 Storage:Edit, Account Settings:Read
+#   CLOUDFLARE_ACCOUNT_ID — from Workers & Pages → Overview (right-hand column)
+name: Deploy
+
+on:
+  push:
+    branches: [claude/confident-hamilton-x510u1, main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Typecheck and test
+        run: npm run typecheck && npm test
+
+      - name: Build web app
+        run: npm run build:web
+
+      - name: Apply D1 migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply ivos --remote --env production
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env production
