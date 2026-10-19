@@ -31,7 +31,7 @@ npx wrangler d1 create ivos
 npx wrangler r2 bucket create ivos-files
 ```
 
-The first command prints a `database_id`. Open `wrangler.jsonc` and replace **both** occurrences of `REPLACE_WITH_D1_ID` (the top-level binding and the one under `env.production`) with that id.
+The database and bucket already exist in the account (created 19 Oct 2026) and `wrangler.jsonc` already carries the database id `a34a52c8-60bf-4940-9606-8b64512a7cbb`, so these two commands report that the resources exist. If you ever recreate them, replace the id in **both** places in `wrangler.jsonc`.
 
 Then create the tables and the pilot data:
 
