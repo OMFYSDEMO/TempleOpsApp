@@ -68,7 +68,8 @@ This builds the web app and deploys the Worker as `avos` to `https://avos.<your-
 
 1. **Workers & Pages → avos → Settings → Domains & Routes → Add → Custom Domain**.
 2. Enter the hostname and select **Add domain**. Cloudflare creates the DNS record and certificate.
-3. Optional but recommended: in the same panel disable the `workers.dev` route and Preview URLs so the app is reachable only on your domain.
+3. Optional but recommended: in the same panel disable the `workers.dev` route and Preview URLs so the app is reachable only on your domain. (Keep `workers.dev` on while the deploy workflow's first smoke test uses it.)
+4. **Zone security must let automated callers through.** The first live test on 19 Oct 2026 was answered with a Cloudflare "Just a moment…" challenge page. In the `shajianandan.com` zone go to **Security → Settings**: set **Security level** to *Medium* (not *I'm Under Attack*) and turn **Bot Fight Mode** off, or add a **WAF custom rule** (Security → WAF → Custom rules) with expression `http.host eq "avos.shajianandan.com"` and action **Skip** → all remaining custom rules and *Bot Fight Mode / Super Bot Fight Mode* where offered. Without this, the Meta webhook, the website form and the deploy smoke test are all challenged. Browser users are unaffected either way.
 
 ## 6. Put Cloudflare Access in front (logins)
 

@@ -69,19 +69,17 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --env production
 
-      # Final test against the live deployment: bindings answer, the API is gated, the web app is served.
-      - name: Smoke test the live site
+      # Final test 1: the deployment itself, via the workers.dev address (never behind zone security rules).
+      - name: Smoke test the deployment (workers.dev)
         env:
-          URL: https://avos.shajianandan.com
-          WORKERS_DEV_URL: ${{ steps.deploy.outputs.deployment-url }}
+          URL: https://avos.shajianandan.workers.dev
         run: |
-          echo "Testing $URL (workers.dev: $WORKERS_DEV_URL)"
           sleep 5
           health=$(curl -sS --max-time 20 "$URL/api/health?deep=1"); echo "health: $health"
-          echo "$health" | grep -q '"ok":true'   || { echo "::error::health not ok"; exit 1; }
-          echo "$health" | grep -q '"db":"ok"'   || { echo "::error::D1 binding failed"; exit 1; }
-          echo "$health" | grep -q '"r2":"ok"'   || { echo "::error::R2 binding failed"; exit 1; }
-          echo "$health" | grep -q '"env":"production"' || { echo "::error::not the production environment"; exit 1; }
+          echo "$health" | grep -q '"ok":true'            || { echo "::error::health not ok"; exit 1; }
+          echo "$health" | grep -q '"db":"ok"'            || { echo "::error::D1 binding failed"; exit 1; }
+          echo "$health" | grep -q '"r2":"ok"'            || { echo "::error::R2 binding failed"; exit 1; }
+          echo "$health" | grep -q '"env":"production"'   || { echo "::error::not the production environment"; exit 1; }
           me=$(curl -sS --max-time 20 -o /dev/null -w "%{http_code}" "$URL/api/me"); echo "GET /api/me -> $me"
           [ "$me" = "401" ] || { echo "::error::/api/me should be 401 without a login, got $me"; exit 1; }
           dev=$(curl -sS --max-time 20 -o /dev/null -w "%{http_code}" -H "x-dev-user: shajianandan@gmail.com" "$URL/api/me"); echo "GET /api/me with dev header -> $dev"
@@ -90,4 +88,21 @@ jobs:
           [ "$hook" = "401" ] || { echo "::error::hook must reject a bad key with 401, got $hook"; exit 1; }
           title=$(curl -sS --max-time 20 "$URL/" | grep -o '<title>[^<]*</title>'); echo "page: $title"
           echo "$title" | grep -q 'AVOS' || { echo "::error::web app not served"; exit 1; }
-          echo "All live checks passed."
+          echo "Deployment checks passed."
+
+      # Final test 2: the public hostname. Zone security (Bot Fight Mode / Under Attack mode / WAF) must let
+      # automated requests through to /api/health and /hooks/*, or webhooks and this test are challenged.
+      - name: Smoke test the custom domain
+        env:
+          URL: https://avos.shajianandan.com
+        run: |
+          body=$(curl -sS --max-time 20 "$URL/api/health?deep=1"); echo "health: ${body:0:200}"
+          if echo "$body" | grep -q 'Just a moment'; then
+            echo "::error::$URL is serving a Cloudflare challenge page to automated requests. In the shajianandan.com zone: Security → Settings → set Security level to Medium and turn Bot Fight Mode off, or add a WAF custom rule that Skips security for hostname avos.shajianandan.com (at least paths /api/health and /hooks/*). Until then the Meta webhook and the website form will be challenged too."
+            exit 1
+          fi
+          echo "$body" | grep -q '"ok":true' || { echo "::error::custom domain health not ok"; exit 1; }
+          me=$(curl -sS --max-time 20 -o /dev/null -w "%{http_code}" "$URL/api/me"); echo "GET /api/me -> $me"
+          [ "$me" = "401" ] || [ "$me" = "302" ] || { echo "::error::/api/me should be 401 (or 302 to Access once it is on), got $me"; exit 1; }
+          title=$(curl -sS --max-time 20 -L "$URL/" | grep -o '<title>[^<]*</title>'); echo "page: $title"
+          echo "Custom domain checks passed."
