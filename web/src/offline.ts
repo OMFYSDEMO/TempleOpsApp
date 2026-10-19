@@ -6,7 +6,7 @@
 import { api } from "./api";
 
 export interface QueuedEntry { key: string; method: string; path: string; body: Record<string, unknown>; label: string; created_at: string; attempts: number; last_error?: string; }
-const STORE = "ivos.queue";
+const STORE = "avos.queue";
 const listeners = new Set<() => void>();
 
 export function readQueue(): QueuedEntry[] { try { return JSON.parse(localStorage.getItem(STORE) ?? "[]"); } catch { return []; } }

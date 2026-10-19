@@ -1,4 +1,4 @@
--- IVOS schema v1. Money is INTEGER paise. Dates are ISO text (YYYY-MM-DD) in the property's timezone.
+-- AVOS schema v1. Money is INTEGER paise. Dates are ISO text (YYYY-MM-DD) in the property's timezone.
 -- Every table carries property_id so the SaaS turn is configuration, not migration.
 
 CREATE TABLE properties (

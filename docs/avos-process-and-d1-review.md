@@ -1,4 +1,4 @@
-# IVOS (Independent Villa Operating System) — process-flow and Cloudflare D1 review
+# AVOS (Independent Villa Operating System) — process-flow and Cloudflare D1 review
 
 Reviewed against the *AVOS Books Product Tour* mock (`index.html`, 19 guided steps, five roles; `capture.html`, the mobile quick-capture mock). Pilot property: Meadows Varkala, 4 rooms. Reviewer notes are written for the build, so each finding ends with a concrete decision to take.
 
@@ -30,7 +30,7 @@ is the correct spine for a small hospitality business, and the "who holds the mo
 ### 2.1 Blocking (decide before the schema is written)
 
 **F1 · Inventory and availability.**
-The tour has no room-night calendar. A lead on *Hold 48 h* must block the rooms, *Won* must consume them, and both must be visible against the OTA bookings that arrive through W1. Today STAAH is the inventory master for OTAs; a direct hold in IVOS that is not closed out in STAAH is a double booking waiting to happen.
+The tour has no room-night calendar. A lead on *Hold 48 h* must block the rooms, *Won* must consume them, and both must be visible against the OTA bookings that arrive through W1. Today STAAH is the inventory master for OTAs; a direct hold in AVOS that is not closed out in STAAH is a double booking waiting to happen.
 *Decision:* add a `room_nights` (or `allocations`) table keyed by room and date, written by W1 (OTA), W2 (direct) and W13 (Hold). The Quote button checks availability first. For v1, a Hold/Won raises a checklist nudge "close out in STAAH"; a STAAH API push is a later step. Hold expiry must release the rows.
 
 **F2 · GST.**

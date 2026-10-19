@@ -1,4 +1,4 @@
-# IVOS — Independent Villa Operating System
+# AVOS — Independent Villa Operating System
 
 Books-first operations for an independent villa: leads, bookings, front desk, collections, invoices, tasks, petty cash, OTA payouts, bank reconciliation, month close and the GST filing sheet — one Cloudflare Worker, one D1 database, one R2 bucket.
 
@@ -39,7 +39,7 @@ Follow `docs/deploy-cloudflare.md` — eleven numbered steps from a fresh Cloudf
 
 ```sh
 npx wrangler login
-npx wrangler d1 create ivos && npx wrangler r2 bucket create ivos-files   # put the D1 id in wrangler.jsonc (both places)
+npx wrangler d1 create avos && npx wrangler r2 bucket create avos-files   # put the D1 id in wrangler.jsonc (both places)
 npm run db:migrate:remote && npm run db:seed:remote                        # edit the seed emails first
 npm run deploy                                                              # wrangler deploy --env production
 ```
@@ -58,4 +58,4 @@ Then attach a custom domain, create the Access application (team domain + AUD ta
 - **Sequential numbers.** Invoices `MV/26-27/001` and credit notes `MV/CN/26-27/001` per property per financial year, allocated atomically; invoices are never deleted, only credited.
 - **Audit.** Every mutation writes an `audit_log` row (who, when, before, after) in the same batch.
 
-See `docs/ivos-process-and-d1-review.md` for the process review that led here.
+See `docs/avos-process-and-d1-review.md` for the process review that led here.

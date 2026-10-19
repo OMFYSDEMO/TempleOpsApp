@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "ivos",
+  "name": "avos",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -14,7 +14,7 @@
     { "binding": "DB", "database_name": "ivos", "database_id": "a34a52c8-60bf-4940-9606-8b64512a7cbb", "migrations_dir": "migrations" }
   ],
   "r2_buckets": [
-    { "binding": "FILES", "bucket_name": "ivos-files" }
+    { "binding": "FILES", "bucket_name": "avos-files" }
   ],
   "triggers": { "crons": ["*/5 * * * *"] },
   "observability": { "enabled": true },
@@ -33,18 +33,18 @@
   // HOOK_SECRET is a secret: `npx wrangler secret put HOOK_SECRET --env production`.
   "env": {
     "production": {
-      "name": "ivos",
+      "name": "avos",
       "d1_databases": [
         { "binding": "DB", "database_name": "ivos", "database_id": "a34a52c8-60bf-4940-9606-8b64512a7cbb", "migrations_dir": "migrations" }
       ],
       "r2_buckets": [
-        { "binding": "FILES", "bucket_name": "ivos-files" }
+        { "binding": "FILES", "bucket_name": "avos-files" }
       ],
       "triggers": { "crons": ["*/5 * * * *"] },
       "observability": { "enabled": true },
       // Uncomment once the domain is onboarded to Email Routing (step 8): Wrangler then creates the routing rule.
       // "addresses": ["inbox@YOUR-DOMAIN"],
-      // Custom domain (step 5): "routes": [{ "pattern": "ivos.YOUR-DOMAIN", "custom_domain": true }],
+      // Custom domain (step 5): "routes": [{ "pattern": "avos.YOUR-DOMAIN", "custom_domain": true }],
       "vars": {
         "APP_ENV": "production",
         "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com",

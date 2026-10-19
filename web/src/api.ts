@@ -1,8 +1,8 @@
 /** Thin API client. Errors carry the server's message so screens can show it verbatim. */
 export class ApiError extends Error { constructor(public status: number, message: string, public detail?: unknown) { super(message); } }
 
-export function devUser(): string | null { try { return localStorage.getItem("ivos.devUser"); } catch { return null; } }
-export function setDevUser(email: string | null) { try { email ? localStorage.setItem("ivos.devUser", email) : localStorage.removeItem("ivos.devUser"); } catch {} }
+export function devUser(): string | null { try { return localStorage.getItem("avos.devUser"); } catch { return null; } }
+export function setDevUser(email: string | null) { try { email ? localStorage.setItem("avos.devUser", email) : localStorage.removeItem("avos.devUser"); } catch {} }
 
 export async function api<T = any>(method: string, path: string, body?: unknown, opts: { raw?: BodyInit; contentType?: string } = {}): Promise<T> {
   const headers: Record<string, string> = {};

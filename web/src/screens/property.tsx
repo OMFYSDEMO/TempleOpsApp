@@ -14,7 +14,7 @@ export function FrontDesk({ }: { me: Me; refs: Ref }) {
     <h2>Front desk <small>{fmtDate(q.data.date)} · one-tap check-in/out</small></h2>
     {result && <Card tone="ok" title="Checked out" sub={result.collection_type === "channel_collect" ? "OTA collect: housekeeping task created, nothing to collect" : result.balance_due_paise > 0 ? `Collect the balance, then issue the invoice` : "Fully paid — issue the invoice"}>
       <Row label="Gross" value={inr(result.gross_paise)} /><Row label="Paid" value={inr(result.paid_paise)} /><Row strong label="Balance due" value={inr(result.balance_due_paise)} />
-      <div class="actions end">{result.balance_due_paise > 0 && <a class="btn gold" href={`#pay`} onClick={() => sessionStorage.setItem("ivos.collect", result.id)}>Collect {inr(result.balance_due_paise)}</a>}{result.collection_type !== "channel_collect" && <Btn kind="primary" onClick={() => run(async () => { const inv = await post(`/invoices/bookings/${result.id}`); window.open(`/api/invoices/${inv.id}/html`, "_blank"); }, "Invoice issued")}>Issue invoice</Btn>}</div></Card>}
+      <div class="actions end">{result.balance_due_paise > 0 && <a class="btn gold" href={`#pay`} onClick={() => sessionStorage.setItem("avos.collect", result.id)}>Collect {inr(result.balance_due_paise)}</a>}{result.collection_type !== "channel_collect" && <Btn kind="primary" onClick={() => run(async () => { const inv = await post(`/invoices/bookings/${result.id}`); window.open(`/api/invoices/${inv.id}/html`, "_blank"); }, "Invoice issued")}>Issue invoice</Btn>}</div></Card>}
     <List title="Arrivals · today" rows={q.data.arrivals} verb="check-in" label="Check in" />
     <List title="Departures · today" rows={q.data.departures} verb="check-out" label="Check out" />
     <List title="In house" rows={q.data.in_house} verb="check-out" label="Check out" />
@@ -29,7 +29,7 @@ export function Payments({ me, refs }: { me: Me; refs: Ref }) {
   const recent = useLoad(() => get("/payments"), []);
   const accounts = useLoad(() => get("/payments/accounts"), []);
   const [sel, setSel] = useState<any>(null); const [amt, setAmt] = useState(0); const [method, setMethod] = useState<string>("upi"); const [refn, setRefn] = useState("");
-  useEffect(() => { const pre = sessionStorage.getItem("ivos.collect"); if (pre && due.data) { const d = due.data.due.find((x: any) => x.booking_id === pre); if (d) { setSel(d); setAmt(d.balance_paise); } sessionStorage.removeItem("ivos.collect"); } }, [due.data]);
+  useEffect(() => { const pre = sessionStorage.getItem("avos.collect"); if (pre && due.data) { const d = due.data.due.find((x: any) => x.booking_id === pre); if (d) { setSel(d); setAmt(d.balance_paise); } sessionStorage.removeItem("avos.collect"); } }, [due.data]);
   const record = () => run(async () => {
     const r = await submit("POST", "/payments", { booking_id: sel?.booking_id ?? null, method, amount_paise: amt, reference: refn || null }, `Collect ${inr(amt)} · ${sel?.guest_name ?? "walk-in"}`);
     if (r.queued) toast("Saved offline · will sync"); else toast(`Posted · ${r.result.fee_expense_id ? "fee booked once" : "no fee"} · balance ${inr(r.result.balance_paise)}`);

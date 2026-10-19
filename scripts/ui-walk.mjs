@@ -9,7 +9,7 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME ?? un
 const errors = [];
 async function openAs(user, hash, { mobile = false } = {}) {
   const ctx = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 }, deviceScaleFactor: 1, isMobile: mobile, hasTouch: mobile });
-  await ctx.addInitScript((u) => localStorage.setItem("ivos.devUser", u), `${user}@meadowsvarkala.example`);
+  await ctx.addInitScript((u) => localStorage.setItem("avos.devUser", u), `${user}@meadowsvarkala.example`);
   const page = await ctx.newPage();
   page.on("console", (m) => { if (m.type() === "error") errors.push(`[${user}#${hash}] console: ${m.text()}`); });
   page.on("pageerror", (e) => errors.push(`[${user}#${hash}] pageerror: ${e.message}`));

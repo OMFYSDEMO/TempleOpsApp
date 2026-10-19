@@ -12,7 +12,7 @@ export async function seed() {
 export async function api<T = any>(user: User | null, method: string, path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<{ status: number; json: T }> {
   const headers: Record<string, string> = { "content-type": "application/json", ...extraHeaders };
   if (user) headers["x-dev-user"] = USERS[user];
-  const res = await SELF.fetch(`http://ivos.test${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const res = await SELF.fetch(`http://avos.test${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await res.text();
   let json: any; try { json = JSON.parse(text); } catch { json = { raw: text }; }
   return { status: res.status, json };

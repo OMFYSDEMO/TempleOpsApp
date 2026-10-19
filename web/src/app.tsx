@@ -45,7 +45,7 @@ export function App() {
   useEffect(() => { load(); }, []);
   useEffect(() => onQueueChange(() => setQueued(readQueue().length)), []);
   useEffect(() => { if (navigator.onLine && readQueue().length) flush().then((n) => { if (n) toast(`${n} queued entr${n === 1 ? "y" : "ies"} synced`); }); }, [me?.actor.id]);
-  if (err) return <div style="padding:24px"><h2>IVOS</h2><p class="muted">{err}</p>{!devUser() && <p>Sign in through Cloudflare Access, or (development only) pick a user:</p>}<select onChange={(e: any) => { setDevUser(e.currentTarget.value || null); load(); }}><option value="">— dev user —</option>{DEV_USERS.map((u) => <option value={u}>{u}</option>)}</select></div>;
+  if (err) return <div style="padding:24px"><h2>AVOS</h2><p class="muted">{err}</p>{!devUser() && <p>Sign in through Cloudflare Access, or (development only) pick a user:</p>}<select onChange={(e: any) => { setDevUser(e.currentTarget.value || null); load(); }}><option value="">— dev user —</option>{DEV_USERS.map((u) => <option value={u}>{u}</option>)}</select></div>;
   if (!me || !ref) return <div class="empty">Loading…</div>;
   const visible = SCREENS.filter((s) => me.capabilities.includes(s.cap));
   const current = visible.find((s) => s.key === hash) ?? visible[0];
@@ -53,7 +53,7 @@ export function App() {
   const openNotifs = async () => { setNotifOpen(true); const r = await get("/notifications"); setNotifs(r.notifications); await post("/notifications/read"); setMe({ ...me, unread_notifications: 0 }); };
   const Comp = current.comp;
   return <>
-    <div class="topbar"><div class="brand">IVOS<small>{me.property.name}</small></div><div class="spacer" />
+    <div class="topbar"><div class="brand">AVOS<small>{me.property.name}</small></div><div class="spacer" />
       {queued > 0 && <span class="queue">{queued} pending sync</span>}
       <button class="bell" onClick={openNotifs} title="Notifications">🔔{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
       <span class="who">{me.actor.name} · {me.actor.role}</span>
