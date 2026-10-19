@@ -3,13 +3,14 @@
 //   npx -y playwright-core@1.56.0 node scripts/ui-walk.mjs      (set CHROME=/path/to/chrome if not auto-detected)
 import { chromium } from "playwright-core";
 const BASE = "http://localhost:8787";
+const USERS = {"shaji": "shajianandan@gmail.com", "prachi": "bookings@meadowsvarkala.com", "sindhu": "meadowsvarkala@gmail.com", "trupti": "trupti@truvic.co.in", "ca": "shubham.kandalkar@gmail.com"};
 const SHOTS = process.env.SHOTS ?? "./ui-shots";
 import { mkdirSync } from "node:fs"; mkdirSync(SHOTS, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROME ?? undefined, args: ["--no-sandbox"] });
 const errors = [];
 async function openAs(user, hash, { mobile = false } = {}) {
   const ctx = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 }, deviceScaleFactor: 1, isMobile: mobile, hasTouch: mobile });
-  await ctx.addInitScript((u) => localStorage.setItem("avos.devUser", u), `${user}@meadowsvarkala.example`);
+  await ctx.addInitScript((u) => localStorage.setItem("avos.devUser", u), USERS[user]);
   const page = await ctx.newPage();
   page.on("console", (m) => { if (m.type() === "error") errors.push(`[${user}#${hash}] console: ${m.text()}`); });
   page.on("pageerror", (e) => errors.push(`[${user}#${hash}] pageerror: ${e.message}`));
@@ -107,7 +108,7 @@ const tomorrow = new Date(Date.parse(today) + 86400e3).toISOString().slice(0, 10
   // check out the OTA guest first as sindhu is not possible here; settle whatever is unsettled if any
   await shot(page, "14-trupti-payouts");
   await page.goto(`${BASE}/#recon`, { waitUntil: "networkidle" }); await page.waitForTimeout(400);
-  await page.locator("textarea").fill(`${today.split("-").reverse().join("/")}\tUPI CR 9876501234 RASHMI\t\t${(await (await fetch(`${BASE}/api/payments`, { headers: { "x-dev-user": "trupti@meadowsvarkala.example" } })).json()).payments[0]?.amount_paise / 100 || 100}\n${today.split("-").reverse().join("/")}\tUNKNOWN CREDIT\t\t999.00`);
+  await page.locator("textarea").fill(`${today.split("-").reverse().join("/")}\tUPI CR 9876501234 RASHMI\t\t${(await (await fetch(`${BASE}/api/payments`, { headers: { "x-dev-user": USERS.trupti } })).json()).payments[0]?.amount_paise / 100 || 100}\n${today.split("-").reverse().join("/")}\tUNKNOWN CREDIT\t\t999.00`);
   await page.getByRole("button", { name: "Match" }).click(); await page.waitForTimeout(800);
   await shot(page, "15-trupti-reconcile");
   await page.goto(`${BASE}/#revdash`, { waitUntil: "networkidle" }); await page.waitForTimeout(500); await shot(page, "16-trupti-revenue");
@@ -128,7 +129,7 @@ const tomorrow = new Date(Date.parse(today) + 86400e3).toISOString().slice(0, 10
 // Role wall from the UI: Prachi has no Dashboard; the API says 403.
 {
   const { ctx, page } = await openAs("prachi", "dash");
-  const r = await page.evaluate(async () => (await fetch("/api/reports/pnl", { headers: { "x-dev-user": "prachi@meadowsvarkala.example" } })).status);
+  const r = await page.evaluate(async () => (await fetch("/api/reports/pnl", { headers: { "x-dev-user": USERS.prachi } })).status);
   if (r !== 403) errors.push(`role wall: prachi got ${r} from /api/reports/pnl`);
   const nav = await page.locator("nav.side a").allTextContents();
   if (nav.some((t) => /Dashboard|Month close|GST/.test(t))) errors.push(`prachi nav leaks: ${nav.join(",")}`);

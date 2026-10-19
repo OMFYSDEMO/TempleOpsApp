@@ -1,7 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import seedSql from "../seed/meadows-varkala.sql?raw";
 
-export const USERS = { shaji: "shaji@meadowsvarkala.example", prachi: "prachi@meadowsvarkala.example", sindhu: "sindhu@meadowsvarkala.example", trupti: "trupti@meadowsvarkala.example", ca: "ca@meadowsvarkala.example" } as const;
+export const USERS = { shaji: "shajianandan@gmail.com", prachi: "bookings@meadowsvarkala.com", sindhu: "meadowsvarkala@gmail.com", trupti: "trupti@truvic.co.in", ca: "shubham.kandalkar@gmail.com" } as const;
 export type User = keyof typeof USERS;
 
 export async function seed() {

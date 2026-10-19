@@ -32,7 +32,7 @@ const SCREENS: Screen[] = [
   { key: "audit", label: "Change log", cap: "audit", group: "Close & file", comp: AuditLog },
 ];
 const LOCK: Record<string, string> = { sales: "Bookings & reservations only. Own unapproved entries editable. No P&L.", property: "Check-in/out, collections, tasks, petty cash. No P&L, no settings.", revenue: "Approves exceptions, payouts, reconciliation, pre-close. Revenue — not expense P&L.", owner: "Oversight + bank-paid expenses. Holds users, backups, final say.", accountant: "Locks months, files GST, reads the change log. No user admin." };
-const DEV_USERS = ["shaji@meadowsvarkala.example", "prachi@meadowsvarkala.example", "sindhu@meadowsvarkala.example", "trupti@meadowsvarkala.example", "ca@meadowsvarkala.example"];
+const DEV_USERS = ["shajianandan@gmail.com", "bookings@meadowsvarkala.com", "meadowsvarkala@gmail.com", "trupti@truvic.co.in", "shubham.kandalkar@gmail.com"];
 
 function useHash() { const [h, setH] = useState(location.hash.slice(1) || ""); useEffect(() => { const f = () => setH(location.hash.slice(1) || ""); addEventListener("hashchange", f); return () => removeEventListener("hashchange", f); }, []); return h; }
 
