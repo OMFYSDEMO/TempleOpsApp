@@ -25,6 +25,23 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Check Cloudflare secrets are visible
+        env:
+          HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          HAS_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+          TOKEN_AS_VARIABLE: ${{ vars.CLOUDFLARE_API_TOKEN != '' }}
+          ACCOUNT_AS_VARIABLE: ${{ vars.CLOUDFLARE_ACCOUNT_ID != '' }}
+        run: |
+          echo "secret CLOUDFLARE_API_TOKEN present:  $HAS_TOKEN"
+          echo "secret CLOUDFLARE_ACCOUNT_ID present: $HAS_ACCOUNT"
+          if [ "$TOKEN_AS_VARIABLE" = "true" ] || [ "$ACCOUNT_AS_VARIABLE" = "true" ]; then
+            echo "::error::Found under Variables, not Secrets. Re-add them on the Secrets tab (Settings → Secrets and variables → Actions → Secrets → New repository secret)."
+          fi
+          if [ "$HAS_TOKEN" != "true" ] || [ "$HAS_ACCOUNT" != "true" ]; then
+            echo "::error::A repository secret is missing. Names must be exactly CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID under Repository secrets."
+            exit 1
+          fi
+
       - name: Install
         run: npm ci --legacy-peer-deps
 
