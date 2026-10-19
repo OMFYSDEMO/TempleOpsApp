@@ -37,9 +37,12 @@ jobs:
           if [ "$TOKEN_AS_VARIABLE" = "true" ] || [ "$ACCOUNT_AS_VARIABLE" = "true" ]; then
             echo "::error::Found under Variables, not Secrets. Re-add them on the Secrets tab (Settings → Secrets and variables → Actions → Secrets → New repository secret)."
           fi
-          if [ "$HAS_TOKEN" != "true" ] || [ "$HAS_ACCOUNT" != "true" ]; then
-            echo "::error::A repository secret is missing. Names must be exactly CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID under Repository secrets."
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is missing. Add it under Repository secrets (Settings → Secrets and variables → Actions)."
             exit 1
+          fi
+          if [ "$HAS_ACCOUNT" != "true" ]; then
+            echo "::warning::CLOUDFLARE_ACCOUNT_ID is not set; Wrangler will try to detect the account from the token (works when the token can see exactly one account)."
           fi
 
       - name: Install
