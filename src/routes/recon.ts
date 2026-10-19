@@ -1,6 +1,6 @@
 import { newRouter, requireCap, body, str, optStr, oneOf } from "../app";
 import { Batch, HttpError, all, one, id, assertPeriodOpen } from "../db";
-import { nowIso, todayIn } from "../domain/dates";
+import { nowIso, todayIn, addDays } from "../domain/dates";
 import { parseStatement, proposeMatch, type Candidate, type StatementLine } from "../domain/recon";
 
 const r = newRouter();
@@ -49,7 +49,8 @@ r.post("/paste", async (c) => {
   const runId = id("run");
   const dates = lines.map((l) => l.on_date).sort();
   const from = dates[0], to = dates[dates.length - 1];
-  const cands = await candidatesFor(c.env.DB, p.id, accountId, from < "2000" ? from : from.slice(0, 8) + "01", to);
+  // Window: from the first of the earliest month to a few days after the last line — bank posting dates lag or lead the books by a day or two.
+  const cands = await candidatesFor(c.env.DB, p.id, accountId, from.slice(0, 8) + "01", addDays(to, 3));
   const b = new Batch(c.env.DB, actor);
   let inserted = 0, dup = 0;
   const usedIds = new Set<string>();

@@ -144,7 +144,7 @@ describe("Lead → CA", () => {
     expect(petty.balance_paise).toBe(500000 + 300000 - 120000);
     const cash = bal.accounts.find((a: any) => a.id === "acc_cash");
     expect(cash.balance_paise).toBe(2000000 - 1750000);
-    const exp = await ok("shaji", "GET", "/api/expenses?scope=all&period=" + new Date().toISOString().slice(0, 7));
+    const exp = await ok("shaji", "GET", "/api/expenses?scope=all&period=" + new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 7));
     expect(exp.expenses.find((e: any) => e.kind === "normal" && e.amount_paise === 300000)).toBeUndefined(); // top-up is not an expense
   });
 
@@ -170,11 +170,12 @@ describe("Lead → CA", () => {
   });
 
   it("W7 · Smart Reconcile proposes in tiers, writes only on accept, and hides debits from the revenue desk", async () => {
+    const istToday = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10).split("-").reverse().join("/");
     const paste = await ok("trupti", "POST", "/api/recon/paste", { account_id: "acc_bank", text: [
       "12/10/2026\tNEFT BOOKING.COM 010649992418\t\t4500.60",
-      `${new Date().toISOString().slice(0, 10).split("-").reverse().join("/")}\tUPI CR UTR7738 MEERA\t\t10000.00`,
-      `${new Date().toISOString().slice(0, 10).split("-").reverse().join("/")}\tCASH DEP VARKALA BR\t\t17500.00`,
-      `${new Date().toISOString().slice(0, 10).split("-").reverse().join("/")}\tKSEB NEFT8841\t4765.00\t`,
+      `${istToday}\tUPI CR UTR7738 MEERA\t\t10000.00`,
+      `${istToday}\tCASH DEP VARKALA BR\t\t17500.00`,
+      `${istToday}\tKSEB NEFT8841\t4765.00\t`,
       "18/10/2026\tUNKNOWN CREDIT\t\t999.00",
     ].join("\n") });
     expect(paste.inserted).toBe(5);
@@ -196,7 +197,7 @@ describe("Lead → CA", () => {
   });
 
   it("W9/W10 · pre-close → lock → GST sheet → filed; the lock binds every role including the owner", async () => {
-    const period = new Date().toISOString().slice(0, 7);
+    const period = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 7);
     const pre = await ok("trupti", "GET", `/api/reports/preclose?period=${period}`);
     expect(pre.stays_not_checked_out).toHaveLength(0);
     // The September-dated OTA settlement is in a different month; this month's exceptions can be acknowledged.
