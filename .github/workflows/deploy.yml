@@ -72,9 +72,10 @@ jobs:
       # Final test against the live deployment: bindings answer, the API is gated, the web app is served.
       - name: Smoke test the live site
         env:
-          URL: ${{ steps.deploy.outputs.deployment-url }}
+          URL: https://avos.shajianandan.com
+          WORKERS_DEV_URL: ${{ steps.deploy.outputs.deployment-url }}
         run: |
-          echo "Testing $URL"
+          echo "Testing $URL (workers.dev: $WORKERS_DEV_URL)"
           sleep 5
           health=$(curl -sS --max-time 20 "$URL/api/health?deep=1"); echo "health: $health"
           echo "$health" | grep -q '"ok":true'   || { echo "::error::health not ok"; exit 1; }

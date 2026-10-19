@@ -44,7 +44,7 @@
       "observability": { "enabled": true },
       // Uncomment once the domain is onboarded to Email Routing (step 8): Wrangler then creates the routing rule.
       // "addresses": ["inbox@YOUR-DOMAIN"],
-      // Custom domain (step 5): "routes": [{ "pattern": "avos.YOUR-DOMAIN", "custom_domain": true }],
+      "routes": [{ "pattern": "avos.shajianandan.com", "custom_domain": true }],
       "vars": {
         "APP_ENV": "production",
         "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com",

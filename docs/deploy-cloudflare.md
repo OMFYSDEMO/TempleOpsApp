@@ -2,7 +2,7 @@
 
 Everything runs in one Cloudflare account: a Worker (API + web app + email handler + cron), a D1 database, an R2 bucket, Cloudflare Access for logins and Email Routing for the inbox. Budget about an hour the first time. Steps 1–7 are the minimum for a working pilot; 8–10 switch on the inbox, lead hooks and backups.
 
-Replace `YOUR-DOMAIN` with a domain that is on Cloudflare DNS (for example `meadowsvarkala.com`) and `YOUR-TEAM` with the Zero Trust team name you pick in step 6.
+The app's hostname is `avos.shajianandan.com`. Replace `YOUR-DOMAIN` below with the domain you use for inbound email (step 8) and `YOUR-TEAM` with the Zero Trust team name you pick in step 6.
 
 ---
 
@@ -64,8 +64,10 @@ This builds the web app and deploys the Worker as `avos` to `https://avos.<your-
 
 ## 5. Attach your own hostname
 
+**Done on 19 Oct 2026:** the app answers on `https://avos.shajianandan.com`. The hostname is declared in `wrangler.jsonc` (`env.production.routes`) so every deploy keeps it, and the post-deploy smoke test runs against it.
+
 1. **Workers & Pages → avos → Settings → Domains & Routes → Add → Custom Domain**.
-2. Enter `avos.YOUR-DOMAIN` and select **Add domain**. Cloudflare creates the DNS record and certificate.
+2. Enter the hostname and select **Add domain**. Cloudflare creates the DNS record and certificate.
 3. Optional but recommended: in the same panel disable the `workers.dev` route and Preview URLs so the app is reachable only on your domain.
 
 ## 6. Put Cloudflare Access in front (logins)
