@@ -1,4 +1,4 @@
-# AVOS (Independent Villa Operating System) — process-flow and Cloudflare D1 review
+# AVOS (Autonomous Villa Operating System) — process-flow and Cloudflare D1 review
 
 Reviewed against the *AVOS Books Product Tour* mock (`index.html`, 19 guided steps, five roles; `capture.html`, the mobile quick-capture mock). Pilot property: Meadows Varkala, 4 rooms. Reviewer notes are written for the build, so each finding ends with a concrete decision to take.
 

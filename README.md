@@ -1,4 +1,4 @@
-# AVOS — Independent Villa Operating System
+# AVOS — Autonomous Villa Operating System
 
 Books-first operations for an independent villa: leads, bookings, front desk, collections, invoices, tasks, petty cash, OTA payouts, bank reconciliation, month close and the GST filing sheet — one Cloudflare Worker, one D1 database, one R2 bucket.
 
