@@ -1,0 +1,18 @@
+{
+  "result": {
+    "placement": {},
+    "compatibility_date": "2026-10-15",
+    "compatibility_flags": [],
+    "usage_model": "standard",
+    "tags": [],
+    "tail_consumers": [],
+    "logpush": false,
+    "annotations": {
+      "workers/triggered_by": "upload"
+    },
+    "bindings": []
+  },
+  "success": true,
+  "errors": [],
+  "messages": []
+}
