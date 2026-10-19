@@ -8,8 +8,12 @@ echo "Testing $URL"
 code=$(curl -sS --max-time 20 -o /tmp/body -w "%{http_code}" -D /tmp/hdr "$URL/api/health?deep=1")
 loc=$(grep -i '^location:' /tmp/hdr | tr -d '\r' | awk '{print $2}' || true)
 body=$(cat /tmp/body)
+echo "status $code${loc:+, location $loc}"
 if grep -q 'Just a moment' /tmp/body; then
   echo "::error::$URL serves a Cloudflare challenge page to automated requests. In the zone: Security → Settings → Security level Medium, Bot Fight Mode off, or a WAF Skip rule for this hostname."; exit 1
+fi
+if [ "$code" = "302" ] && echo "$loc" | grep -q "cloudflareaccess.com" && ! echo "$loc" | grep -q "$TEAM"; then
+  echo "::error::$URL redirects to an Access team other than $TEAM: $loc — set ACCESS_TEAM_DOMAIN in wrangler.jsonc to that team's domain."; exit 1
 fi
 if [ "$code" = "302" ] && echo "$loc" | grep -q "$TEAM"; then
   echo "Access is ON: $URL redirects to $loc"
