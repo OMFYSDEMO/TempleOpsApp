@@ -33,17 +33,13 @@ npx wrangler r2 bucket create avos-files
 
 The bucket `avos-files` and a D1 database already exist in the account (created 19 Oct 2026). The database is still *named* `ivos` (D1 databases cannot be renamed; the name is internal and never shown to users) and `wrangler.jsonc` already carries its id `a34a52c8-60bf-4940-9606-8b64512a7cbb`, so skip the two create commands. If you would rather have the database named `avos`, run `npx wrangler d1 create avos`, put the new id in **both** places in `wrangler.jsonc`, change `database_name` to `avos` in `wrangler.jsonc` and the four `db:*` scripts in `package.json`, and delete the old one with `npx wrangler d1 delete ivos`.
 
-Then create the tables and the pilot data:
+**Already done on 19 Oct 2026:** the schema (`0001_init.sql`) and the pilot seed were applied to the live database and the migration is recorded, so `npm run db:migrate:remote` reports nothing to apply. The five users still carry placeholder `@meadowsvarkala.example` emails. Replace them with the real login addresses (the Access login email must match exactly), either as the owner under **Settings & users** once you can sign in, or directly:
 
 ```sh
-npm run db:migrate:remote
+npx wrangler d1 execute ivos --remote --env production --command "UPDATE users SET email='you@example.com' WHERE id='usr_shaji'"
 ```
 
-Before seeding, open `seed/meadows-varkala.sql` and change the five `@meadowsvarkala.example` emails to the real addresses your team will sign in with (the Access login email must match exactly). Then:
-
-```sh
-npm run db:seed:remote
-```
+(ids: `usr_shaji` owner, `usr_prachi` sales, `usr_sindhu` property, `usr_trupti` revenue, `usr_ca` accountant.) For a fresh database the commands are `npm run db:migrate:remote` then `npm run db:seed:remote` after editing the emails in `seed/meadows-varkala.sql`.
 
 ## 4. First deploy (no logins yet)
 
