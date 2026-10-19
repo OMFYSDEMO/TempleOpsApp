@@ -1,36 +1,37 @@
 import { useEffect, useState } from "preact/hooks";
 import { get, post, devUser, setDevUser } from "./api";
-import { Toaster, Empty, fmtDateTime, toast, Btn } from "./ui";
+import { Toaster, Empty, fmtDateTime, fmtDate, toast, Btn } from "./ui";
 import { readQueue, onQueueChange, flush } from "./offline";
 import { Leads, Inbox, Reservations, Availability } from "./screens/sales";
 import { FrontDesk, Payments, Invoices, Tasks, Expenses, QuickCapture } from "./screens/property";
 import { Approvals, Payouts, Reconcile, RevenueOverview, OwnerDashboard, BankExpenses, Admin, MonthClose, GstSheet, AuditLog } from "./screens/management";
 import { Login, ResetPassword, ChangePassword } from "./screens/auth";
+import { Icon } from "./icons";
 
 export interface Me { actor: { id: string; name: string; role: string; email: string; via?: string }; property: { id: string; name: string; gstin: string | null; today: string; auto_approve_on_tariff: boolean }; capabilities: string[]; unread_notifications: number; must_change_password?: boolean; has_password?: boolean; }
 export interface Ref { locations: any[]; channels: any[]; accounts: any[]; users: any[]; rate_cards: any[]; }
 
-type Screen = { key: string; label: string; cap: string; group: string; comp: (p: { me: Me; refs: Ref }) => any; mobile?: boolean };
+type Screen = { key: string; label: string; cap: string; group: string; comp: (p: { me: Me; refs: Ref }) => any; mobile?: boolean; icon: string };
 const SCREENS: Screen[] = [
-  { key: "leads", label: "Leads", cap: "leads", group: "Sales", comp: Leads, mobile: true },
-  { key: "inbox", label: "Inbox — bookings", cap: "inbox", group: "Sales", comp: Inbox },
-  { key: "resv", label: "Reservations", cap: "bookings_write", group: "Sales", comp: Reservations, mobile: true },
-  { key: "avail", label: "Availability", cap: "bookings_read", group: "Sales", comp: Availability },
-  { key: "desk", label: "Front desk", cap: "frontdesk", group: "Property", comp: FrontDesk, mobile: true },
-  { key: "pay", label: "Payments", cap: "payments", group: "Property", comp: Payments, mobile: true },
-  { key: "invoice", label: "Guest invoices", cap: "invoices", group: "Property", comp: Invoices },
-  { key: "tasks", label: "Tasks", cap: "tasks", group: "Property", comp: Tasks, mobile: true },
-  { key: "pexp", label: "Expenses & petty cash", cap: "petty_expenses", group: "Property", comp: Expenses },
-  { key: "appr", label: "Approvals", cap: "approvals", group: "Revenue", comp: Approvals, mobile: true },
-  { key: "payouts", label: "OTA payouts", cap: "settlements", group: "Revenue", comp: Payouts },
-  { key: "recon", label: "Smart Reconcile", cap: "recon", group: "Revenue", comp: Reconcile },
-  { key: "revdash", label: "Revenue overview", cap: "revenue_reports", group: "Revenue", comp: RevenueOverview },
-  { key: "dash", label: "Dashboard", cap: "pnl_reports", group: "Owner", comp: OwnerDashboard, mobile: true },
-  { key: "bankexp", label: "Bank expenses", cap: "bank_expenses", group: "Owner", comp: BankExpenses },
-  { key: "admin", label: "Settings & users", cap: "admin", group: "Owner", comp: Admin },
-  { key: "close", label: "Month close", cap: "close", group: "Close & file", comp: MonthClose },
-  { key: "gst", label: "GST filing sheet", cap: "gst", group: "Close & file", comp: GstSheet },
-  { key: "audit", label: "Change log", cap: "audit", group: "Close & file", comp: AuditLog },
+  { key: "leads", label: "Leads", cap: "leads", group: "Sales", comp: Leads, mobile: true, icon: "leads" },
+  { key: "inbox", label: "Inbox — bookings", cap: "inbox", group: "Sales", comp: Inbox, icon: "inbox" },
+  { key: "resv", label: "Reservations", cap: "bookings_write", group: "Sales", comp: Reservations, mobile: true, icon: "calendar" },
+  { key: "avail", label: "Availability", cap: "bookings_read", group: "Sales", comp: Availability, icon: "grid" },
+  { key: "desk", label: "Front desk", cap: "frontdesk", group: "Property", comp: FrontDesk, mobile: true, icon: "key" },
+  { key: "pay", label: "Payments", cap: "payments", group: "Property", comp: Payments, mobile: true, icon: "banknote" },
+  { key: "invoice", label: "Guest invoices", cap: "invoices", group: "Property", comp: Invoices, icon: "file" },
+  { key: "tasks", label: "Tasks", cap: "tasks", group: "Property", comp: Tasks, mobile: true, icon: "tasks" },
+  { key: "pexp", label: "Expenses & petty cash", cap: "petty_expenses", group: "Property", comp: Expenses, icon: "receipt" },
+  { key: "appr", label: "Approvals", cap: "approvals", group: "Revenue", comp: Approvals, mobile: true, icon: "check" },
+  { key: "payouts", label: "OTA payouts", cap: "settlements", group: "Revenue", comp: Payouts, icon: "swap" },
+  { key: "recon", label: "Smart Reconcile", cap: "recon", group: "Revenue", comp: Reconcile, icon: "reconcile" },
+  { key: "revdash", label: "Revenue overview", cap: "revenue_reports", group: "Revenue", comp: RevenueOverview, icon: "chart" },
+  { key: "dash", label: "Dashboard", cap: "pnl_reports", group: "Owner", comp: OwnerDashboard, mobile: true, icon: "dashboard" },
+  { key: "bankexp", label: "Bank expenses", cap: "bank_expenses", group: "Owner", comp: BankExpenses, icon: "bank" },
+  { key: "admin", label: "Settings & users", cap: "admin", group: "Owner", comp: Admin, icon: "settings" },
+  { key: "close", label: "Month close", cap: "close", group: "Close & file", comp: MonthClose, icon: "lock" },
+  { key: "gst", label: "GST filing sheet", cap: "gst", group: "Close & file", comp: GstSheet, icon: "percent" },
+  { key: "audit", label: "Change log", cap: "audit", group: "Close & file", comp: AuditLog, icon: "history" },
 ];
 const LOCK: Record<string, string> = { sales: "Bookings & reservations only. Own unapproved entries editable. No P&L.", property: "Check-in/out, collections, tasks, petty cash. No P&L, no settings.", revenue: "Approves exceptions, payouts, reconciliation, pre-close. Revenue — not expense P&L.", owner: "Oversight + bank-paid expenses. Holds users, backups, final say.", accountant: "Locks months, files GST, reads the change log. No user admin." };
 const DEV_USERS = ["shajianandan@gmail.com", "bookings@meadowsvarkala.com", "meadowsvarkala@gmail.com", "trupti@truvic.co.in", "shubham.kandalkar@gmail.com"];
@@ -64,22 +65,33 @@ export function App() {
   const groups = [...new Set(visible.map((s) => s.group))];
   const openNotifs = async () => { setNotifOpen(true); const r = await get("/notifications"); setNotifs(r.notifications); await post("/notifications/read"); setMe({ ...me, unread_notifications: 0 }); };
   const Comp = current.comp;
+  const initials = me.actor.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  const roleNote = LOCK[me.actor.role];
   return <>
-    <div class="topbar"><div class="brand">AVOS<small>{me.property.name}</small></div><div class="spacer" />
-      {queued > 0 && <span class="queue">{queued} pending sync</span>}
-      <button class="bell" onClick={openNotifs} title="Notifications">🔔{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
-      <details class="usermenu"><summary>{me.actor.name} · {me.actor.role}</summary><div>
-        <div class="sub">{me.actor.email}</div>
-        {me.actor.via !== "access" && <button onClick={() => setChangePw(true)}>Change password</button>}
-        <button onClick={signOut}>Sign out</button>
-        {devUser() && appEnv !== "production" && <div class="sub"><label>Dev user <select value={devUser() ?? ""} onChange={(e: any) => { setDevUser(e.currentTarget.value); location.hash = ""; load(); }}>{DEV_USERS.map((u) => <option value={u}>{u.split("@")[0]}</option>)}</select></label></div>}
-      </div></details>
+    <div class="shell">
+      <nav class="side">
+        <a class="brand" href="#"><span class="mark">A</span><span><b>AVOS</b><small>{me.property.name}</small></span></a>
+        {groups.map((g) => <div key={g}><div class="grp">{g}</div>{visible.filter((s) => s.group === g).map((s) => <a key={s.key} href={`#${s.key}`} class={`item ${s.key === current.key ? "on" : ""}`}><Icon name={s.icon} />{s.label}</a>)}</div>)}
+        <div class="foot"><b>{me.actor.role.charAt(0).toUpperCase() + me.actor.role.slice(1)} access</b>{roleNote}</div>
+      </nav>
+      <div class="content">
+        <div class="topbar">
+          <a class="mbrand" href="#"><span class="mark">A</span>AVOS</a>
+          <div class="where"><Icon name="house" size={16} /><b>{me.property.name}</b><span>· {fmtDate(me.property.today)}</span></div>
+          <div class="spacer" />
+          {queued > 0 && <span class="queue">{queued} pending sync</span>}
+          <button class="iconbtn" onClick={openNotifs} title="Notifications"><Icon name="bell" />{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
+          <details class="usermenu"><summary><span class="avatar">{initials}</span><span>{me.actor.name}</span><span class="role">· {me.actor.role}</span><Icon name="chevron" size={14} /></summary><div>
+            <div class="sub">{me.actor.email}</div>
+            {me.actor.via !== "access" && <button onClick={() => setChangePw(true)}><Icon name="lock" size={16} />Change password</button>}
+            <button onClick={signOut}><Icon name="logout" size={16} />Sign out</button>
+            {devUser() && appEnv !== "production" && <div class="sub"><label>Dev user <select value={devUser() ?? ""} onChange={(e: any) => { setDevUser(e.currentTarget.value); location.hash = ""; load(); }}>{DEV_USERS.map((u) => <option value={u}>{u.split("@")[0]}</option>)}</select></label></div>}
+          </div></details>
+        </div>
+        <main><Comp me={me} refs={ref} /></main>
+      </div>
     </div>
-    <div class="layout">
-      <nav class="side">{groups.map((g) => <div key={g}><div class="grp">{g}</div>{visible.filter((s) => s.group === g).map((s) => <a key={s.key} href={`#${s.key}`} class={s.key === current.key ? "on" : ""}>{s.label}</a>)}</div>)}<div class="lock">{LOCK[me.actor.role]}</div></nav>
-      <main><Comp me={me} refs={ref} /></main>
-    </div>
-    <nav class="mobile-nav">{visible.filter((s) => s.mobile).slice(0, 5).map((s) => <a key={s.key} href={`#${s.key}`} class={s.key === current.key ? "on" : ""}>{s.label.split(" ")[0]}</a>)}</nav>
+    <nav class="mobile-nav">{visible.filter((s) => s.mobile).slice(0, 5).map((s) => <a key={s.key} href={`#${s.key}`} class={s.key === current.key ? "on" : ""}><Icon name={s.icon} size={20} />{s.label.split(" ")[0]}</a>)}</nav>
     {me.capabilities.includes("tasks") && <QuickCapture me={me} refs={ref} />}
     {notifOpen && <div class="sheet" onClick={() => setNotifOpen(false)}><div onClick={(e) => e.stopPropagation()}><h3>Notifications</h3>{notifs.length === 0 ? <Empty>No notifications.</Empty> : notifs.map((n) => <div class="row" key={n.id}><div><div>{n.message}</div><div class="sub">{fmtDateTime(n.created_at)}</div></div></div>)}</div></div>}
     <Toaster />
