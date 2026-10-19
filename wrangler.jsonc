@@ -49,7 +49,7 @@
       "workers_dev": true,
       "vars": {
         "APP_ENV": "production",
-        "ACCESS_TEAM_DOMAIN": "meadowsvarkala.cloudflareaccess.com",
+        "ACCESS_TEAM_DOMAIN": "kshetrom.cloudflareaccess.com",
         "ACCESS_AUD": "",
         "DEV_USER_EMAIL": "",
         "INBOX_PROPERTY_ID": "prop_meadows"

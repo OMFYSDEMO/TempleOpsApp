@@ -73,6 +73,8 @@ This builds the web app and deploys the Worker as `avos` to `https://avos.<your-
 
 ## 6. Put Cloudflare Access in front (logins)
 
+**Done on 19 Oct 2026:** the account's existing Zero Trust team is `kshetrom` (team domain `kshetrom.cloudflareaccess.com`) and an Access application protects `avos.shajianandan.com`. The Worker pins that team domain in `env.production.vars.ACCESS_TEAM_DOMAIN`; `ACCESS_AUD` is optional and blank. Still to do when the lead hooks go live (step 9): a second self-hosted application on `avos.shajianandan.com` with paths `hooks` and `api/health` and a **Bypass** policy for Everyone, otherwise webhooks are sent to the login page.
+
 Access gives you Google / one-time-PIN logins for up to 50 users at no cost, and the Worker trusts only the signed token Access adds to each request.
 
 1. **Zero Trust** (left menu). The first visit asks you to choose a **team name**: pick something like `meadows`. Your team domain is then `meadows.cloudflareaccess.com`. Choose the Free plan.

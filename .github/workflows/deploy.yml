@@ -72,7 +72,7 @@ jobs:
       # Final tests. Before Access is switched on, the API answers 401 and the deep health check proves the bindings.
       # Once Access protects the Worker, every address redirects to the team login page, which is what we assert instead.
       - name: Smoke test the deployment (workers.dev)
-        run: bash scripts/smoke.sh https://avos.shajianandan.workers.dev meadowsvarkala.cloudflareaccess.com
+        run: bash scripts/smoke.sh https://avos.shajianandan.workers.dev kshetrom.cloudflareaccess.com
 
       - name: Smoke test the custom domain
-        run: bash scripts/smoke.sh https://avos.shajianandan.com meadowsvarkala.cloudflareaccess.com
+        run: bash scripts/smoke.sh https://avos.shajianandan.com kshetrom.cloudflareaccess.com
