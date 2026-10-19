@@ -45,6 +45,8 @@
       // Uncomment once the domain is onboarded to Email Routing (step 8): Wrangler then creates the routing rule.
       // "addresses": ["inbox@YOUR-DOMAIN"],
       "routes": [{ "pattern": "avos.shajianandan.com", "custom_domain": true }],
+      // Keep the workers.dev address too: the deploy smoke test uses it, and zone security rules never apply there.
+      "workers_dev": true,
       "vars": {
         "APP_ENV": "production",
         "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com",
