@@ -1,0 +1,33 @@
+# Runs one SQL file from the repo against the production D1 database (one-off data loads such as the
+# AVOS Books migration). On demand only: Actions → Apply SQL to production D1 → Run workflow → file path.
+name: Apply SQL to production D1
+
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: "Path of the .sql file in the repo"
+        required: true
+        default: "migration/avosbooks-2026-10-to-2027-01.sql"
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Apply
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 execute ivos --remote --env production --yes --file ${{ inputs.file }}
