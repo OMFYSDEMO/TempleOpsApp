@@ -8,13 +8,13 @@
     "dev": "wrangler dev",
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts",
-    "deploy": "npm run build:web && wrangler deploy",
+    "deploy": "npm run build:web && wrangler deploy --env production",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "test": "vitest run",
     "db:migrate:local": "wrangler d1 migrations apply ivos --local",
-    "db:migrate:remote": "wrangler d1 migrations apply ivos --remote",
+    "db:migrate:remote": "wrangler d1 migrations apply ivos --remote --env production",
     "db:seed:local": "wrangler d1 execute ivos --local --file=seed/meadows-varkala.sql",
-    "db:seed:remote": "wrangler d1 execute ivos --remote --file=seed/meadows-varkala.sql"
+    "db:seed:remote": "wrangler d1 execute ivos --remote --env production --file=seed/meadows-varkala.sql"
   },
   "dependencies": {
     "@cloudflare/vitest-plugin": "^1.4.5",

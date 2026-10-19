@@ -35,13 +35,16 @@ npm run typecheck
 
 ## Deploy
 
-1. `npx wrangler d1 create ivos` and put the id in `wrangler.jsonc`; `npx wrangler r2 bucket create ivos-files`.
-2. `npm run db:migrate:remote && npm run db:seed:remote` (edit `seed/meadows-varkala.sql` first: real emails, GSTIN when registered).
-3. Put a Cloudflare Access application in front of the Worker's hostname; set `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `APP_ENV=production`, `INBOX_PROPERTY_ID=prop_meadows` as vars and `HOOK_SECRET` as a secret.
-4. `npm run deploy`.
-5. Email Routing: create `inbox@<your-domain>` → this Worker, then auto-forward STAAH / SwiftBook / Airpay mail from the current mailbox to it. Until then, paste emails into the Inbox screen; same parser, same audit.
-6. Lead hooks: website form posts to `/hooks/leads/website?key=<HOOK_SECRET>`; Meta Lead Ads webhook at `/hooks/leads/meta` (verify token = `HOOK_SECRET`).
-7. Use the Workers Paid plan from go-live: free-tier D1 limits now fail queries once exceeded.
+Follow `docs/deploy-cloudflare.md` — eleven numbered steps from a fresh Cloudflare account to a live pilot with Access logins, Email Routing and lead hooks. Short version:
+
+```sh
+npx wrangler login
+npx wrangler d1 create ivos && npx wrangler r2 bucket create ivos-files   # put the D1 id in wrangler.jsonc (both places)
+npm run db:migrate:remote && npm run db:seed:remote                        # edit the seed emails first
+npm run deploy                                                              # wrangler deploy --env production
+```
+
+Then attach a custom domain, create the Access application (team domain + AUD tag into `env.production.vars`), set `HOOK_SECRET`, and redeploy.
 
 ## The rules the code enforces
 

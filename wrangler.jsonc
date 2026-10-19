@@ -17,11 +17,41 @@
     { "binding": "FILES", "bucket_name": "ivos-files" }
   ],
   "triggers": { "crons": ["*/5 * * * *"] },
+  "observability": { "enabled": true },
+
+  // Local development: no Access, a seeded dev user stands in.
   "vars": {
     "APP_ENV": "development",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
-    "DEV_USER_EMAIL": "shaji@meadowsvarkala.example"
+    "DEV_USER_EMAIL": "shaji@meadowsvarkala.example",
+    "INBOX_PROPERTY_ID": "prop_meadows"
   },
-  "observability": { "enabled": true }
+
+  // Production: deploy with `npm run deploy` (= wrangler deploy --env production).
+  // Fill ACCESS_TEAM_DOMAIN and ACCESS_AUD from the Access application (docs/deploy-cloudflare.md, step 6).
+  // HOOK_SECRET is a secret: `npx wrangler secret put HOOK_SECRET --env production`.
+  "env": {
+    "production": {
+      "name": "ivos",
+      "d1_databases": [
+        { "binding": "DB", "database_name": "ivos", "database_id": "REPLACE_WITH_D1_ID", "migrations_dir": "migrations" }
+      ],
+      "r2_buckets": [
+        { "binding": "FILES", "bucket_name": "ivos-files" }
+      ],
+      "triggers": { "crons": ["*/5 * * * *"] },
+      "observability": { "enabled": true },
+      // Uncomment once the domain is onboarded to Email Routing (step 8): Wrangler then creates the routing rule.
+      // "addresses": ["inbox@YOUR-DOMAIN"],
+      // Custom domain (step 5): "routes": [{ "pattern": "ivos.YOUR-DOMAIN", "custom_domain": true }],
+      "vars": {
+        "APP_ENV": "production",
+        "ACCESS_TEAM_DOMAIN": "REPLACE.cloudflareaccess.com",
+        "ACCESS_AUD": "REPLACE_WITH_AUD_TAG",
+        "DEV_USER_EMAIL": "",
+        "INBOX_PROPERTY_ID": "prop_meadows"
+      }
+    }
+  }
 }
