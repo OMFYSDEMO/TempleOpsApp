@@ -1,10 +1,11 @@
 // UI smoke walk: drives the Lead → CA flow through the real app for every role, screenshots each screen,
-// and fails on console errors, page errors or 5xx. Needs a running `npm run dev` on :8787 and a seeded local D1.
+// and fails on console errors, page errors or 5xx. Needs a running `npm run dev` on :8787 and a seeded local D1. Expects a freshly seeded database: a second run on the same data trips duplicate/availability checks.
 //   npx -y playwright-core@1.56.0 node scripts/ui-walk.mjs      (set CHROME=/path/to/chrome if not auto-detected)
 import { chromium } from "playwright-core";
 const BASE = "http://localhost:8787";
 const USERS = {"shaji": "shajianandan@gmail.com", "prachi": "bookings@meadowsvarkala.com", "sindhu": "meadowsvarkala@gmail.com", "trupti": "trupti@truvic.co.in", "ca": "shubham.kandalkar@gmail.com"};
 const SHOTS = process.env.SHOTS ?? "./ui-shots";
+const REF = `10609${Date.now()}`; // unique per run so the ingest is not flagged as a duplicate of an earlier walk
 import { mkdirSync } from "node:fs"; mkdirSync(SHOTS, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROME ?? undefined, args: ["--no-sandbox"] });
 const errors = [];
@@ -12,7 +13,7 @@ async function openAs(user, hash, { mobile = false } = {}) {
   const ctx = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 }, deviceScaleFactor: 1, isMobile: mobile, hasTouch: mobile });
   await ctx.addInitScript((u) => localStorage.setItem("avos.devUser", u), USERS[user]);
   const page = await ctx.newPage();
-  page.on("console", (m) => { if (m.type() === "error") errors.push(`[${user}#${hash}] console: ${m.text()}`); });
+  page.on("console", (m) => { if (m.type() === "error" && !/status of 403/.test(m.text())) errors.push(`[${user}#${hash}] console: ${m.text()}`); }); // the role-wall step deliberately triggers one 403
   page.on("pageerror", (e) => errors.push(`[${user}#${hash}] pageerror: ${e.message}`));
   page.on("response", (r) => { if (r.url().includes("/api/") && r.status() >= 500) errors.push(`[${user}#${hash}] ${r.status()} ${r.url()}`); });
   await page.goto(`${BASE}/#${hash}`, { waitUntil: "networkidle" });
@@ -53,9 +54,9 @@ const tomorrow = new Date(Date.parse(today) + 86400e3).toISOString().slice(0, 10
   await page.goto(`${BASE}/#resv`, { waitUntil: "networkidle" }); await page.waitForTimeout(400);
   await shot(page, "03-prachi-reservations");
   await page.goto(`${BASE}/#inbox`, { waitUntil: "networkidle" }); await page.waitForTimeout(300);
-  await page.getByLabel("From").fill("noreply@staah.com");
-  await page.getByLabel("Subject").fill("STAAH · New reservation · Booking.com");
-  await page.getByLabel("Body (text)").fill(`Channel: Booking.com\nRef: 1060900000001336\nGuest: Astha Sharma\nRoom: Premium ×1\nCheck-in: ${today.split("-").reverse().join("/")}\nCheck-out: ${tomorrow.split("-").reverse().join("/")}\nRoom Total: ₹6,500.00 (ex-GST)\nCommission: 23%\nChannel Collect`);
+  await page.getByLabel("From", { exact: true }).fill("noreply@staah.com");
+  await page.getByLabel("Subject", { exact: true }).fill("STAAH · New reservation · Booking.com");
+  await page.getByLabel("Body (text)").fill(`Channel: Booking.com\nRef: ${REF}\nGuest: Astha Sharma\nRoom: Premium ×1\nCheck-in: ${today.split("-").reverse().join("/")}\nCheck-out: ${tomorrow.split("-").reverse().join("/")}\nRoom Total: ₹6,500.00 (ex-GST)\nCommission: 23%\nChannel Collect`);
   await page.getByRole("button", { name: "Ingest" }).click(); await page.waitForTimeout(700);
   const item = page.locator(".card", { hasText: "Astha Sharma" }).first();
   await item.getByRole("button", { name: "Premium" }).click();
@@ -109,7 +110,7 @@ const tomorrow = new Date(Date.parse(today) + 86400e3).toISOString().slice(0, 10
   await shot(page, "14-trupti-payouts");
   await page.goto(`${BASE}/#recon`, { waitUntil: "networkidle" }); await page.waitForTimeout(400);
   await page.locator("textarea").fill(`${today.split("-").reverse().join("/")}\tUPI CR 9876501234 RASHMI\t\t${(await (await fetch(`${BASE}/api/payments`, { headers: { "x-dev-user": USERS.trupti } })).json()).payments[0]?.amount_paise / 100 || 100}\n${today.split("-").reverse().join("/")}\tUNKNOWN CREDIT\t\t999.00`);
-  await page.getByRole("button", { name: "Match" }).click(); await page.waitForTimeout(800);
+  await page.getByRole("button", { name: "Match", exact: true }).click(); await page.waitForTimeout(800);
   await shot(page, "15-trupti-reconcile");
   await page.goto(`${BASE}/#revdash`, { waitUntil: "networkidle" }); await page.waitForTimeout(500); await shot(page, "16-trupti-revenue");
   await ctx.close();
@@ -129,7 +130,7 @@ const tomorrow = new Date(Date.parse(today) + 86400e3).toISOString().slice(0, 10
 // Role wall from the UI: Prachi has no Dashboard; the API says 403.
 {
   const { ctx, page } = await openAs("prachi", "dash");
-  const r = await page.evaluate(async () => (await fetch("/api/reports/pnl", { headers: { "x-dev-user": USERS.prachi } })).status);
+  const r = await page.evaluate(async (u) => (await fetch("/api/reports/pnl", { headers: { "x-dev-user": u } })).status, USERS.prachi);
   if (r !== 403) errors.push(`role wall: prachi got ${r} from /api/reports/pnl`);
   const nav = await page.locator("nav.side a").allTextContents();
   if (nav.some((t) => /Dashboard|Month close|GST/.test(t))) errors.push(`prachi nav leaks: ${nav.join(",")}`);

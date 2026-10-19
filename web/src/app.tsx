@@ -1,12 +1,13 @@
 import { useEffect, useState } from "preact/hooks";
 import { get, post, devUser, setDevUser } from "./api";
-import { Toaster, Empty, fmtDateTime, toast } from "./ui";
+import { Toaster, Empty, fmtDateTime, toast, Btn } from "./ui";
 import { readQueue, onQueueChange, flush } from "./offline";
 import { Leads, Inbox, Reservations, Availability } from "./screens/sales";
 import { FrontDesk, Payments, Invoices, Tasks, Expenses, QuickCapture } from "./screens/property";
 import { Approvals, Payouts, Reconcile, RevenueOverview, OwnerDashboard, BankExpenses, Admin, MonthClose, GstSheet, AuditLog } from "./screens/management";
+import { Login, ResetPassword, ChangePassword } from "./screens/auth";
 
-export interface Me { actor: { id: string; name: string; role: string; email: string }; property: { id: string; name: string; gstin: string | null; today: string; auto_approve_on_tariff: boolean }; capabilities: string[]; unread_notifications: number; }
+export interface Me { actor: { id: string; name: string; role: string; email: string; via?: string }; property: { id: string; name: string; gstin: string | null; today: string; auto_approve_on_tariff: boolean }; capabilities: string[]; unread_notifications: number; must_change_password?: boolean; has_password?: boolean; }
 export interface Ref { locations: any[]; channels: any[]; accounts: any[]; users: any[]; rate_cards: any[]; }
 
 type Screen = { key: string; label: string; cap: string; group: string; comp: (p: { me: Me; refs: Ref }) => any; mobile?: boolean };
@@ -37,16 +38,27 @@ const DEV_USERS = ["shajianandan@gmail.com", "bookings@meadowsvarkala.com", "mea
 function useHash() { const [h, setH] = useState(location.hash.slice(1) || ""); useEffect(() => { const f = () => setH(location.hash.slice(1) || ""); addEventListener("hashchange", f); return () => removeEventListener("hashchange", f); }, []); return h; }
 
 export function App() {
-  const [me, setMe] = useState<Me | null>(null); const [ref, setRef] = useState<Ref | null>(null); const [err, setErr] = useState<string | null>(null);
+  const [me, setMe] = useState<Me | null>(null); const [ref, setRef] = useState<Ref | null>(null); const [signedOut, setSignedOut] = useState(false); const [err, setErr] = useState<string | null>(null);
+  const [appEnv, setAppEnv] = useState<string>("");
   const [notifOpen, setNotifOpen] = useState(false); const [notifs, setNotifs] = useState<any[]>([]);
   const [queued, setQueued] = useState(readQueue().length);
+  const [changePw, setChangePw] = useState(false);
   const hash = useHash();
-  const load = async () => { try { const [m, r] = await Promise.all([get<Me>("/me"), get<Ref>("/ref")]); setMe(m); setRef(r); setErr(null); } catch (e: any) { setErr(e?.message ?? String(e)); setMe(null); } };
-  useEffect(() => { load(); }, []);
+  const load = async () => {
+    try { const [m, r] = await Promise.all([get<Me>("/me"), get<Ref>("/ref")]); setMe(m); setRef(r); setErr(null); setSignedOut(false); }
+    catch (e: any) { setMe(null); if (e?.status === 401) setSignedOut(true); else setErr(e?.message ?? String(e)); }
+  };
+  useEffect(() => { load(); get("/health").then((h) => setAppEnv(h.env)).catch(() => {}); }, []);
   useEffect(() => onQueueChange(() => setQueued(readQueue().length)), []);
   useEffect(() => { if (navigator.onLine && readQueue().length) flush().then((n) => { if (n) toast(`${n} queued entr${n === 1 ? "y" : "ies"} synced`); }); }, [me?.actor.id]);
-  if (err) return <div style="padding:24px"><h2>AVOS</h2><p class="muted">{err}</p>{!devUser() && <p>Sign in through Cloudflare Access, or (development only) pick a user:</p>}<select onChange={(e: any) => { setDevUser(e.currentTarget.value || null); load(); }}><option value="">— dev user —</option>{DEV_USERS.map((u) => <option value={u}>{u}</option>)}</select></div>;
+  const signOut = async () => { try { await post("/auth/logout"); } catch {} setDevUser(null); setMe(null); setSignedOut(true); location.hash = ""; };
+
+  const resetToken = hash.startsWith("reset?") ? new URLSearchParams(hash.slice(6)).get("token") : null;
+  if (resetToken) return <><ResetPassword token={resetToken} onDone={() => { location.hash = ""; load(); }} /><Toaster /></>;
+  if (err) return <div style="padding:24px"><h2>AVOS</h2><p class="muted">{err}</p><Btn onClick={load}>Retry</Btn></div>;
+  if (signedOut) return <><Login onSignedIn={load} devUsers={appEnv && appEnv !== "production" ? DEV_USERS : undefined} onDevUser={(u) => { setDevUser(u || null); load(); }} /><Toaster /></>;
   if (!me || !ref) return <div class="empty">Loading…</div>;
+  if (me.must_change_password || changePw) return <><ChangePassword forced={!!me.must_change_password} hasPassword={!!me.has_password} onDone={() => { setChangePw(false); load(); }} /><Toaster /></>;
   const visible = SCREENS.filter((s) => me.capabilities.includes(s.cap));
   const current = visible.find((s) => s.key === hash) ?? visible[0];
   const groups = [...new Set(visible.map((s) => s.group))];
@@ -56,8 +68,12 @@ export function App() {
     <div class="topbar"><div class="brand">AVOS<small>{me.property.name}</small></div><div class="spacer" />
       {queued > 0 && <span class="queue">{queued} pending sync</span>}
       <button class="bell" onClick={openNotifs} title="Notifications">🔔{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
-      <span class="who">{me.actor.name} · {me.actor.role}</span>
-      {devUser() && <select value={devUser() ?? ""} onChange={(e: any) => { setDevUser(e.currentTarget.value); location.hash = ""; load(); }}>{DEV_USERS.map((u) => <option value={u}>{u.split("@")[0]}</option>)}</select>}
+      <details class="usermenu"><summary>{me.actor.name} · {me.actor.role}</summary><div>
+        <div class="sub">{me.actor.email}</div>
+        {me.actor.via !== "access" && <button onClick={() => setChangePw(true)}>Change password</button>}
+        <button onClick={signOut}>Sign out</button>
+        {devUser() && appEnv !== "production" && <div class="sub"><label>Dev user <select value={devUser() ?? ""} onChange={(e: any) => { setDevUser(e.currentTarget.value); location.hash = ""; load(); }}>{DEV_USERS.map((u) => <option value={u}>{u.split("@")[0]}</option>)}</select></label></div>}
+      </div></details>
     </div>
     <div class="layout">
       <nav class="side">{groups.map((g) => <div key={g}><div class="grp">{g}</div>{visible.filter((s) => s.group === g).map((s) => <a key={s.key} href={`#${s.key}`} class={s.key === current.key ? "on" : ""}>{s.label}</a>)}</div>)}<div class="lock">{LOCK[me.actor.role]}</div></nav>

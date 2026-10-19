@@ -15,6 +15,7 @@ import reports from "./routes/reports";
 import close from "./routes/close";
 import admin from "./routes/admin";
 import hooks from "./routes/hooks";
+import auth from "./routes/auth";
 import { runCron } from "./cron";
 import { handleEmail } from "./email/handler";
 
@@ -31,6 +32,7 @@ app.get("/api/health", async (c) => {
   return c.json(out, out.ok ? 200 : 503);
 });
 app.route("/hooks", hooks as unknown as Hono<AppEnv>);
+app.route("/api/auth", auth as unknown as Hono<AppEnv>);
 
 const api = new Hono<AppEnv>();
 api.use("*", authenticate);

@@ -13,7 +13,7 @@ Pilot property: Meadows Varkala (4 rooms). Every table carries `property_id`, so
 | Files | R2 (bill photos, invoice PDFs, month-close packs) served only through the role-checked API |
 | Inbox | Email Routing → Email Worker (`postal-mime`) parses STAAH / SwiftBook / Airpay mail |
 | Nudges | Cron Trigger every 5 min: hold & quote expiry, 15/60-minute lead nudges |
-| Auth | Cloudflare Access in front; the Access JWT's email is looked up in `users`. Role walls are enforced per API route. |
+| Auth | AVOS's own email + password login (PBKDF2, D1 sessions, secure cookie, lockout, forced change, reset links); Cloudflare Access accepted as an optional second layer. Role walls are enforced per API route. |
 | UI | Preact + Vite PWA served as Worker static assets; quick capture is offline-first with idempotency keys |
 
 ## Run locally
@@ -26,7 +26,7 @@ npm run build:web
 npm run dev                      # http://localhost:8787
 ```
 
-Outside production, pick a seeded user with the `x-dev-user` header or the user switcher in the top bar (`DEV_USER_EMAIL` in `wrangler.jsonc` is the default). In production only the Access JWT is accepted.
+Sign in with email and password. Outside production the sign-in screen also offers the seeded users (dev header), and `DEV_USER_EMAIL` in `wrangler.jsonc` (empty by default) can pin a default identity for API tools like curl. In production only a session cookie or a Cloudflare Access token is accepted; the owner sets passwords or hands out set-password links under Settings & users.
 
 ```sh
 npm test                         # domain tests + the Lead → CA flow against an isolated D1

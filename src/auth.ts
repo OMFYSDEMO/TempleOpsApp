@@ -9,32 +9,107 @@ export interface Actor {
   email: string;
   name: string;
   role: Role;
+  /** how the caller was identified: session cookie, Cloudflare Access, or the dev header */
+  via?: "session" | "access" | "dev";
+  session_id?: string;
+}
+
+// ---------- passwords ----------
+export const PBKDF2_ITERATIONS = 100_000; // Workers cap PBKDF2 at 100k iterations
+export const MIN_PASSWORD_LENGTH = 10;
+const enc = new TextEncoder();
+
+export function hex(buf: ArrayBuffer | Uint8Array): string {
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function fromHex(s: string): Uint8Array { return new Uint8Array(s.match(/../g)!.map((h) => parseInt(h, 16))); }
+
+export async function hashPassword(password: string, saltHex?: string, iterations = PBKDF2_ITERATIONS) {
+  const salt = saltHex ? fromHex(saltHex) : crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey("raw", enc.encode(password.normalize("NFKC")), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256);
+  return { hash: hex(bits), salt: hex(salt), iterations };
+}
+
+export async function verifyPassword(password: string, hashHex: string, saltHex: string, iterations: number): Promise<boolean> {
+  const { hash } = await hashPassword(password, saltHex, iterations);
+  if (hash.length !== hashHex.length) return false;
+  let diff = 0; for (let i = 0; i < hash.length; i++) diff |= hash.charCodeAt(i) ^ hashHex.charCodeAt(i);
+  return diff === 0;
+}
+
+export function passwordProblem(p: string): string | null {
+  if (typeof p !== "string" || p.length < MIN_PASSWORD_LENGTH) return `use at least ${MIN_PASSWORD_LENGTH} characters`;
+  if (p.length > 200) return "too long";
+  if (/^(.)\1+$/.test(p) || /^(0123456789|1234567890|password|qwertyuiop)/i.test(p)) return "that password is too easy to guess";
+  return null;
+}
+
+// ---------- tokens & sessions ----------
+export function randomToken(bytes = 32): string {
+  const b = crypto.getRandomValues(new Uint8Array(bytes));
+  return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+export async function sha256Hex(s: string): Promise<string> { return hex(await crypto.subtle.digest("SHA-256", enc.encode(s))); }
+
+export const SESSION_COOKIE = "avos_session";
+export const SESSION_DAYS = 30;
+export const LOCK_AFTER_FAILURES = 5;
+export const LOCK_MINUTES = 15;
+
+export function cookieValue(req: Request, name: string): string | null {
+  const raw = req.headers.get("cookie"); if (!raw) return null;
+  for (const part of raw.split(";")) { const [k, ...v] = part.trim().split("="); if (k === name) return decodeURIComponent(v.join("=")); }
+  return null;
+}
+export function sessionCookie(value: string, req: Request, maxAgeSeconds: number): string {
+  const secure = new URL(req.url).protocol === "https:" ? "; Secure" : "";
+  return `${SESSION_COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`;
+}
+
+interface SessionRow { session_id: string; id: string; property_id: string; email: string; name: string; role: Role; expires_at: string; last_seen_at: string | null }
+
+async function sessionActor(req: Request, db: D1Database): Promise<Actor | null> {
+  const value = cookieValue(req, SESSION_COOKIE);
+  if (!value) return null;
+  const sid = await sha256Hex(value);
+  const row = await db.prepare(
+    `SELECT s.id AS session_id, u.id, u.property_id, u.email, u.name, u.role, s.expires_at, s.last_seen_at
+     FROM sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.id = ? AND s.revoked_at IS NULL AND s.expires_at > ? AND u.active = 1`).bind(sid, new Date().toISOString()).first<SessionRow>();
+  if (!row) return null;
+  // touch at most once an hour to keep writes cheap
+  if (!row.last_seen_at || Date.now() - Date.parse(row.last_seen_at) > 3_600_000)
+    await db.prepare("UPDATE sessions SET last_seen_at = ? WHERE id = ?").bind(new Date().toISOString(), sid).run();
+  return { id: row.id, property_id: row.property_id, email: row.email, name: row.name, role: row.role, via: "session", session_id: sid };
 }
 
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
-/**
- * Identify the caller. In production this is the Cloudflare Access JWT (verified against the team's
- * JWKS); the email claim is then looked up in `users`. Outside production, when Access is not
- * configured, an `x-dev-user` header or DEV_USER_EMAIL stands in so the API can be exercised locally.
- */
-export async function resolveEmail(req: Request, env: Env): Promise<string | null> {
+async function accessEmail(req: Request, env: Env): Promise<string | null> {
+  if (!env.ACCESS_TEAM_DOMAIN) return null;
   const jwt = req.headers.get("Cf-Access-Jwt-Assertion");
-  if (env.ACCESS_TEAM_DOMAIN) {
-    // Access mode: the token must be signed by this team's keys and issued by this team.
-    // The audience is checked when ACCESS_AUD is configured; with one application per team it may be left blank.
-    if (!jwt) return null;
-    const issuer = `https://${env.ACCESS_TEAM_DOMAIN}`;
-    let jwks = jwksCache.get(issuer);
-    if (!jwks) { jwks = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`)); jwksCache.set(issuer, jwks); }
-    try {
-      const { payload } = await jwtVerify(jwt, jwks, { issuer, ...(env.ACCESS_AUD ? { audience: env.ACCESS_AUD } : {}) });
-      return typeof payload.email === "string" ? payload.email.toLowerCase() : null;
-    } catch { return null; }
-  }
-  if (env.APP_ENV === "production") return null; // never fall through to dev identity in production
-  const dev = req.headers.get("x-dev-user") || env.DEV_USER_EMAIL;
-  return dev ? dev.toLowerCase() : null;
+  if (!jwt) return null;
+  const issuer = `https://${env.ACCESS_TEAM_DOMAIN}`;
+  let jwks = jwksCache.get(issuer);
+  if (!jwks) { jwks = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`)); jwksCache.set(issuer, jwks); }
+  try {
+    const { payload } = await jwtVerify(jwt, jwks, { issuer, ...(env.ACCESS_AUD ? { audience: env.ACCESS_AUD } : {}) });
+    return typeof payload.email === "string" ? payload.email.toLowerCase() : null;
+  } catch { return null; }
+}
+
+/**
+ * Identify the caller, in order: the app's own session cookie; a Cloudflare Access token when a team is
+ * configured; and, outside production only, the dev header / DEV_USER_EMAIL so the API can be exercised locally.
+ */
+export async function resolveActor(req: Request, env: Env): Promise<Actor | null> {
+  const fromSession = await sessionActor(req, env.DB);
+  if (fromSession) return fromSession;
+  const email = (await accessEmail(req, env)) ?? (env.APP_ENV !== "production" ? (req.headers.get("x-dev-user") || env.DEV_USER_EMAIL || "").toLowerCase() || null : null);
+  if (!email) return null;
+  const actor = await loadActor(env.DB, email);
+  return actor ? { ...actor, via: req.headers.get("Cf-Access-Jwt-Assertion") ? "access" : "dev" } : null;
 }
 
 export async function loadActor(db: D1Database, email: string): Promise<Actor | null> {

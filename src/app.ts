@@ -1,6 +1,6 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { Env } from "./env";
-import { resolveEmail, loadActor, allowed, CAN, type Actor } from "./auth";
+import { resolveActor, allowed, CAN, type Actor } from "./auth";
 import { HttpError, loadProperty, type PropertyRow } from "./db";
 import { assertIsoDate } from "./domain/dates";
 
@@ -8,10 +8,8 @@ export type AppEnv = { Bindings: Env; Variables: { actor: Actor; property: Prope
 export type Ctx = Context<AppEnv>;
 
 export const authenticate: MiddlewareHandler<AppEnv> = async (c, next) => {
-  const email = await resolveEmail(c.req.raw, c.env);
-  if (!email) throw new HttpError(401, "not signed in");
-  const actor = await loadActor(c.env.DB, email);
-  if (!actor) throw new HttpError(403, `no active user for ${email}`);
+  const actor = await resolveActor(c.req.raw, c.env);
+  if (!actor) throw new HttpError(401, "not signed in");
   c.set("actor", actor);
   c.set("property", await loadProperty(c.env.DB, actor.property_id));
   await next();

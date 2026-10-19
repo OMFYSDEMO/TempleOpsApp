@@ -24,7 +24,7 @@
     "APP_ENV": "development",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
-    "DEV_USER_EMAIL": "shajianandan@gmail.com",
+    "DEV_USER_EMAIL": "",
     "INBOX_PROPERTY_ID": "prop_meadows"
   },
 
@@ -52,8 +52,12 @@
         "ACCESS_TEAM_DOMAIN": "kshetrom.cloudflareaccess.com",
         "ACCESS_AUD": "",
         "DEV_USER_EMAIL": "",
-        "INBOX_PROPERTY_ID": "prop_meadows"
+        "INBOX_PROPERTY_ID": "prop_meadows",
+        "APP_URL": "https://avos.shajianandan.com",
+        "EMAIL_FROM": ""
       }
+      // Password-reset emails: onboard a domain to Email Service (Compute → Email Service), then uncomment and set EMAIL_FROM:
+      // "send_email": [{ "name": "EMAIL" }],
     }
   }
 }

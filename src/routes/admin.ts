@@ -3,6 +3,7 @@ import { Batch, HttpError, all, one, id } from "../db";
 import { gstinFormatValid } from "../domain/gst";
 import { CAN } from "../auth";
 import { todayIn } from "../domain/dates";
+import { setPassword, createPasswordLink } from "./auth";
 
 const r = newRouter();
 
@@ -11,7 +12,8 @@ r.get("/me", async (c) => {
   const actor = c.get("actor"); const p = c.get("property");
   const caps = Object.entries(CAN).filter(([, roles]) => roles.includes(actor.role)).map(([k]) => k);
   const unread = await one<{ n: number }>(c.env.DB, "SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL", actor.id);
-  return c.json({ actor, property: { id: p.id, name: p.name, gstin: p.gstin, timezone: p.timezone, today: todayIn(p.timezone), invoice_prefix: p.invoice_prefix, auto_approve_on_tariff: p.auto_approve_on_tariff === 1 }, capabilities: caps, unread_notifications: unread?.n ?? 0 });
+  const cred = await one<{ must_change: number }>(c.env.DB, "SELECT must_change FROM credentials WHERE user_id = ?", actor.id);
+  return c.json({ must_change_password: !!cred?.must_change, has_password: !!cred, actor, property: { id: p.id, name: p.name, gstin: p.gstin, timezone: p.timezone, today: todayIn(p.timezone), invoice_prefix: p.invoice_prefix, auto_approve_on_tariff: p.auto_approve_on_tariff === 1 }, capabilities: caps, unread_notifications: unread?.n ?? 0 });
 });
 
 r.get("/ref", async (c) => {
@@ -90,6 +92,36 @@ admin.patch("/users/:id", async (c) => {
   const b = new Batch(c.env.DB, actor);
   b.add(`UPDATE users SET ${Object.keys(after).map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, ...Object.values(after), u.id);
   b.audit("user.update", "user", u.id, Object.fromEntries(Object.keys(after).map((k) => [k, u[k]])), after);
+  await b.run();
+  return c.json({ ok: true });
+});
+/** Owner sets a temporary password; the user must change it at first sign-in. */
+admin.post("/users/:id/set-password", async (c) => {
+  const p = c.get("property"); const actor = c.get("actor"); const x = await body(c);
+  const u = await one<{ id: string; email: string }>(c.env.DB, "SELECT id, email FROM users WHERE id = ? AND property_id = ? AND active = 1", c.req.param("id"), p.id);
+  if (!u) throw new HttpError(404, "user not found");
+  await setPassword(c.env.DB, u.id, str(x.password, "password"), x.must_change !== false, actor, "password.set_by_owner");
+  return c.json({ ok: true, must_change: x.must_change !== false });
+});
+/** Owner gets a one-time set-password link to hand to the user (valid 72 h). */
+admin.post("/users/:id/password-link", async (c) => {
+  const p = c.get("property"); const actor = c.get("actor");
+  const u = await one<{ id: string; email: string }>(c.env.DB, "SELECT id, email FROM users WHERE id = ? AND property_id = ? AND active = 1", c.req.param("id"), p.id);
+  if (!u) throw new HttpError(404, "user not found");
+  const link = await createPasswordLink(c.env.DB, c.env, c.req.raw, u.id, "invite", actor.id);
+  const b = new Batch(c.env.DB, actor); b.audit("password.link", "user", u.id, null, { by: actor.id }); await b.run();
+  return c.json({ link, expires_in_hours: 72, email: u.email });
+});
+admin.get("/users/:id/sessions", async (c) => {
+  const p = c.get("property");
+  const rows = await all(c.env.DB, "SELECT s.created_at, s.last_seen_at, s.expires_at, s.user_agent, s.revoked_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.property_id = ? AND s.user_id = ? ORDER BY s.created_at DESC LIMIT 20", p.id, c.req.param("id"));
+  return c.json({ sessions: rows });
+});
+admin.post("/users/:id/sign-out-everywhere", async (c) => {
+  const p = c.get("property"); const actor = c.get("actor");
+  const b = new Batch(c.env.DB, actor);
+  b.add("UPDATE sessions SET revoked_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL AND user_id IN (SELECT id FROM users WHERE property_id = ?)", c.req.param("id"), p.id);
+  b.audit("sessions.revoke_all", "user", c.req.param("id"), null, null);
   await b.run();
   return c.json({ ok: true });
 });

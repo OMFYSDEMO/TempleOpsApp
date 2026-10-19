@@ -71,7 +71,18 @@ This builds the web app and deploys the Worker as `avos` to `https://avos.<your-
 3. Optional but recommended: in the same panel disable the `workers.dev` route and Preview URLs so the app is reachable only on your domain. (Keep `workers.dev` on while the deploy workflow's first smoke test uses it.)
 4. **Zone security must let automated callers through.** The first live test on 19 Oct 2026 was answered with a Cloudflare "Just a moment…" challenge page. In the `shajianandan.com` zone go to **Security → Settings**: set **Security level** to *Medium* (not *I'm Under Attack*) and turn **Bot Fight Mode** off, or add a **WAF custom rule** (Security → WAF → Custom rules) with expression `http.host eq "avos.shajianandan.com"` and action **Skip** → all remaining custom rules and *Bot Fight Mode / Super Bot Fight Mode* where offered. Without this, the Meta webhook, the website form and the deploy smoke test are all challenged. Browser users are unaffected either way.
 
-## 6. Put Cloudflare Access in front (logins)
+## 6. Logins
+
+**Since 19 Oct 2026 AVOS has its own sign-in screen** (email + password): sessions in D1 behind a secure cookie, lockout after five failed attempts, forced password change after a temporary password, forgot-password links, sign-out everywhere. Cloudflare Access is no longer required, and the Worker still accepts Access logins while both are on.
+
+**How people get their password**
+
+- The owner opens **Settings & users** and either **Set password** (a temporary one, which the person must change at first sign-in) or **Password link** (a one-time link valid 72 hours, sent by WhatsApp or mail).
+- **Forgot password?** on the sign-in screen emails a reset link once Email Sending is configured (`send_email` binding and `EMAIL_FROM` in `wrangler.jsonc`, domain onboarded under Compute → Email Service). Until then it tells the person to ask the owner for a link.
+
+**Switching Access off** (so the AVOS sign-in screen is what people see): Zero Trust → Access controls → Applications → the `avos.shajianandan.com` application → Delete. Leaving `ACCESS_TEAM_DOMAIN` set is harmless. If you prefer both layers, keep the application: Access signs people in first, and AVOS recognises the Access identity without asking for a password.
+
+### 6a. Cloudflare Access (optional second layer, the original step 6)
 
 **Done on 19 Oct 2026:** the account's existing Zero Trust team is `kshetrom` (team domain `kshetrom.cloudflareaccess.com`) and an Access application protects `avos.shajianandan.com`. The Worker pins that team domain in `env.production.vars.ACCESS_TEAM_DOMAIN`; `ACCESS_AUD` is optional and blank. Still to do when the lead hooks go live (step 9): a second self-hosted application on `avos.shajianandan.com` with paths `hooks` and `api/health` and a **Bypass** policy for Everyone, otherwise webhooks are sent to the login page.
 

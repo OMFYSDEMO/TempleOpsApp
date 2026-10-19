@@ -39,6 +39,20 @@ table.t { width: 100%; border-collapse: collapse; font-size: 14px; } table.t th,
 .queue { background: var(--ambbg); color: var(--amb); padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
 .muted { color: var(--soft); } .mono { font-family: ui-monospace, Menlo, monospace; font-size: 13px; } .pre { white-space: pre-wrap; font-size: 13px; }
 details summary { cursor: pointer; color: var(--soft); font-size: 13px; }
-@media (max-width: 800px) { nav.side { display: none; } .mobile-nav { display: flex; } main { padding: 12px 12px 96px; } }
+@media (max-width: 800px) { nav.side { display: none; } .mobile-nav { display: flex; } main { padding: 12px 12px 96px; } .topbar .brand small { display: none; } }
 .mobile-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: var(--card); border-top: 1px solid var(--line); justify-content: space-around; padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); z-index: 8; } .mobile-nav a { text-decoration: none; color: var(--soft); font-size: 11px; text-align: center; padding: 4px 6px; border-radius: 8px; } .mobile-nav a.on { color: var(--green); font-weight: 700; }
 @media (min-width: 801px) { .fab { right: 32px; bottom: 32px; } }
+
+.authwrap { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: linear-gradient(160deg, var(--green) 0%, var(--green) 40%, var(--paper) 40.1%); }
+.authcard { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px 24px; width: 100%; max-width: 400px; box-shadow: 0 18px 50px rgba(0,0,0,.18); }
+.authcard h2 { margin: 8px 0 12px; font-size: 20px; }
+.logo { display: flex; align-items: center; gap: 12px; } .logo img { border-radius: 12px; } .logo b { font-size: 22px; letter-spacing: .03em; display: block; } .logo small { color: var(--soft); font-size: 12px; }
+.btn.wide { width: 100%; margin-top: 6px; }
+.autherr { background: var(--badbg); color: var(--bad); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin: 6px 0; }
+.authmsg { background: var(--okbg); color: var(--ok); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin: 6px 0; }
+.authlinks { margin-top: 12px; font-size: 13px; text-align: center; } .authlinks a { color: var(--soft); }
+.devbox { margin-top: 18px; border-top: 1px dashed var(--line); padding-top: 10px; } .devbox small { display: block; color: var(--soft); margin-bottom: 4px; } .devbox select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+.usermenu { position: relative; min-width: 0; } .usermenu summary { list-style: none; cursor: pointer; font-size: 13px; opacity: .95; padding: 4px 8px; border: 1px solid rgba(255,255,255,.3); border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 44vw; } .usermenu summary::-webkit-details-marker { display: none; }
+.usermenu > div { position: absolute; right: 0; top: 34px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-width: 220px; box-shadow: 0 8px 24px rgba(0,0,0,.18); z-index: 20; }
+.usermenu > div button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 8px; border-radius: 6px; font: inherit; color: var(--ink); cursor: pointer; } .usermenu > div button:hover { background: var(--paper); }
+.usermenu > div .sub { padding: 4px 8px 8px; } .usermenu > div select { color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-size: 13px; margin-left: 6px; }

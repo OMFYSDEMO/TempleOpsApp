@@ -33,6 +33,8 @@ dev=$(curl -sS --max-time 20 -o /dev/null -w "%{http_code}" -H "x-dev-user: shaj
 [ "$dev" = "401" ] || { echo "::error::dev-user header must be ignored in production, got $dev"; exit 1; }
 hook=$(curl -sS --max-time 20 -o /dev/null -w "%{http_code}" -X POST "$URL/hooks/leads/website?key=wrong" -H 'content-type: application/json' -d '{"name":"probe"}'); echo "POST /hooks/leads/website (bad key) -> $hook"
 [ "$hook" = "401" ] || { echo "::error::hook must reject a bad key with 401, got $hook"; exit 1; }
+login=$(curl -sS --max-time 20 -o /dev/null -w "%{http_code}" -X POST "$URL/api/auth/login" -H 'content-type: application/json' -d '{"email":"nobody@example.com","password":"not-a-real-password"}'); echo "POST /api/auth/login (bad credentials) -> $login"
+[ "$login" = "401" ] || { echo "::error::login must refuse bad credentials with 401, got $login"; exit 1; }
 title=$(curl -sS --max-time 20 "$URL/" | grep -o '<title>[^<]*</title>'); echo "page: $title"
 echo "$title" | grep -q 'AVOS' || { echo "::error::web app not served"; exit 1; }
-echo "Access is not on yet; deployment checks passed."
+echo "Deployment checks passed (in-app login active, no Access redirect)."
