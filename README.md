@@ -59,3 +59,7 @@ Then attach a custom domain, create the Access application (team domain + AUD ta
 - **Audit.** Every mutation writes an `audit_log` row (who, when, before, after) in the same batch.
 
 See `docs/avos-process-and-d1-review.md` for the process review that led here.
+
+## Other income
+
+Money earned outside room stays (meals for day guests, photoshoots, events) is recorded under Payments → Other income, inclusive of GST with the slab chosen at entry. It reaches the money-account balances, the revenue overview, the P&L, the GST filing sheet and the month-close statement pack.

@@ -133,10 +133,11 @@ r.get("/accounts", requireCap("payments"), async (c) => {
     `SELECT a.*,
        a.opening_paise
        + COALESCE((SELECT SUM(CASE WHEN kind='refund' THEN -amount_paise ELSE amount_paise END) FROM payments WHERE account_id = a.id AND status != 'void' AND received_on <= ?),0)
+       + COALESCE((SELECT SUM(amount_paise) FROM other_income WHERE account_id = a.id AND voided_at IS NULL AND on_date <= ?),0)
        - COALESCE((SELECT SUM(amount_paise) FROM expenses WHERE paid_from_account_id = a.id AND voided_at IS NULL AND on_date <= ?),0)
        + COALESCE((SELECT SUM(amount_paise) FROM transfers WHERE to_account_id = a.id AND voided_at IS NULL AND on_date <= ?),0)
        - COALESCE((SELECT SUM(amount_paise) FROM transfers WHERE from_account_id = a.id AND voided_at IS NULL AND on_date <= ?),0) AS balance_paise
-     FROM money_accounts a WHERE a.property_id = ? AND a.active = 1 ORDER BY a.kind`, asOf, asOf, asOf, asOf, p.id);
+     FROM money_accounts a WHERE a.property_id = ? AND a.active = 1 ORDER BY a.kind`, asOf, asOf, asOf, asOf, asOf, p.id);
   const period = asOf.slice(0, 7);
   const spent = await all(c.env.DB, "SELECT paid_from_account_id AS account_id, SUM(amount_paise) AS spent_paise FROM expenses WHERE property_id = ? AND voided_at IS NULL AND substr(on_date,1,7) = ? GROUP BY paid_from_account_id", p.id, period);
   return c.json({ as_of: asOf, accounts: rows, spent_this_month: spent });

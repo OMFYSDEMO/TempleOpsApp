@@ -15,11 +15,19 @@ export async function revenueSummary(db: D1Database, propertyId: string, period:
   const otaClearing = await one<any>(db, `SELECT COALESCE(SUM(b.gross_paise),0) AS paise, COUNT(*) AS stays FROM bookings b JOIN channels ch ON ch.id = b.channel_id WHERE b.property_id = ? AND ch.collection_type = 'channel_collect' AND b.status = 'checked_out'
      AND b.id NOT IN (SELECT si.booking_id FROM settlement_items si JOIN settlements s ON s.id = si.settlement_id WHERE s.status = 'settled')`, propertyId);
   const advances = await one<any>(db, `SELECT COALESCE(SUM(p.amount_paise),0) AS paise, COUNT(*) AS n FROM payments p JOIN bookings b ON b.id = p.booking_id WHERE p.property_id = ? AND p.kind = 'advance' AND p.status != 'void' AND p.received_on BETWEEN ? AND ? AND b.books_date > ?`, propertyId, from, to, to);
-  const taxable = rev.taxable_paise - cn.taxable_paise;
+  // Other income (meals, photoshoots, events) is revenue too: it joins the totals, the slab table and the P&L.
+  const other = await one<any>(db, "SELECT COALESCE(SUM(taxable_paise),0) AS taxable_paise, COALESCE(SUM(gst_paise),0) AS gst_paise, COALESCE(SUM(amount_paise),0) AS gross_paise, COUNT(*) AS n FROM other_income WHERE property_id = ? AND voided_at IS NULL AND on_date BETWEEN ? AND ?", propertyId, from, to);
+  const otherByCat = await all<any>(db, "SELECT category, COUNT(*) AS n, SUM(taxable_paise) AS taxable_paise, SUM(amount_paise) AS gross_paise FROM other_income WHERE property_id = ? AND voided_at IS NULL AND on_date BETWEEN ? AND ? GROUP BY category ORDER BY taxable_paise DESC", propertyId, from, to);
+  const otherBySlab = await all<any>(db, "SELECT gst_rate_bp, SUM(taxable_paise) AS taxable_paise, SUM(gst_paise) AS gst_paise FROM other_income WHERE property_id = ? AND voided_at IS NULL AND on_date BETWEEN ? AND ? GROUP BY gst_rate_bp", propertyId, from, to);
+  const slabs = new Map<number, { gst_rate_bp: number; taxable_paise: number; gst_paise: number }>();
+  for (const s of [...bySlab, ...otherBySlab]) { const g = slabs.get(s.gst_rate_bp) ?? { gst_rate_bp: s.gst_rate_bp, taxable_paise: 0, gst_paise: 0 }; g.taxable_paise += s.taxable_paise; g.gst_paise += s.gst_paise; slabs.set(s.gst_rate_bp, g); }
+  const taxable = rev.taxable_paise - cn.taxable_paise + other.taxable_paise;
   return {
-    period, stays: rev.stays, taxable_paise: taxable, gst_paise: rev.gst_paise - cn.gst_paise, gross_paise: rev.gross_paise - cn.taxable_paise - cn.gst_paise,
+    period, stays: rev.stays, taxable_paise: taxable, gst_paise: rev.gst_paise - cn.gst_paise + other.gst_paise, gross_paise: rev.gross_paise - cn.taxable_paise - cn.gst_paise + other.gross_paise,
+    rooms_taxable_paise: rev.taxable_paise - cn.taxable_paise,
     direct_share_pct: rev.taxable_paise ? Math.round((rev.direct_taxable_paise * 100) / rev.taxable_paise) : 0,
-    credit_notes: cn, by_source: bySource, by_slab: bySlab, ota_clearing: otaClearing,
+    credit_notes: cn, by_source: bySource, by_slab: [...slabs.values()].sort((a, b) => a.gst_rate_bp - b.gst_rate_bp), ota_clearing: otaClearing,
+    other_income: { ...other, by_category: otherByCat },
     advances_for_future_stays: advances, // GST time-of-supply note for the CA (F2)
   };
 }

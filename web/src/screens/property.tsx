@@ -55,9 +55,39 @@ export function Payments({ me, refs }: { me: Me; refs: Ref }) {
           <Field label="To"><select value={trf.to_account_id} onChange={(e: any) => setTrf({ ...trf, to_account_id: e.currentTarget.value })}><option value="">—</option>{refs.accounts.map((a) => <option value={a.id}>{a.name}</option>)}</select></Field>
           <Field label="Amount (₹)"><input inputMode="decimal" onInput={(e: any) => setTrf({ ...trf, amount_paise: Math.round(Number(e.currentTarget.value) * 100) })} /></Field><Field label="Reference"><input value={trf.reference} onInput={(e: any) => setTrf({ ...trf, reference: e.currentTarget.value })} /></Field>
           <div class="actions end"><Btn kind="primary" onClick={() => run(async () => { await post("/payments/transfers", trf); await accounts.reload(); }, "Transfer recorded")}>Record transfer</Btn></div></details>}</Card>
+      <OtherIncome onChange={() => accounts.reload()} />
       <Card title="Recent payments">{!recent.data ? <Loading /> : recent.data.payments.length === 0 ? <Empty>None yet.</Empty> : recent.data.payments.slice(0, 15).map((p: any) => <div class="row" key={p.id}><div><div>{p.guest_name ?? "—"} · {p.method} · {p.kind} {p.status === "void" && <Status s="void" />}</div><div class="sub">{fmtDate(p.received_on)} · {p.account_name}{p.reference ? ` · ${p.reference}` : ""}{p.fee_paise ? ` · fee ${inr(p.fee_paise)}` : ""}</div></div><div class="actions"><b class="num">{p.kind === "refund" ? "−" : ""}{inr(p.amount_paise)}</b>{p.status !== "void" && p.status !== "matched" && <Btn small kind="danger" onClick={() => { const reason = prompt("Void reason"); if (reason) run(async () => { await post(`/payments/${p.id}/void`, { reason }); await Promise.all([recent.reload(), accounts.reload(), due.reload()]); }, "Voided · fee followed"); }}>Void</Btn>}</div></div>)}</Card>
     </div>
   </>;
+}
+
+const INCOME_CATEGORIES = [["dining", "Meals / dining"], ["photo", "Photoshoot"], ["events", "Event / venue"], ["transport", "Transport"], ["other", "Other"]] as const;
+const GST_CHOICES = [["0", "No GST"], ["500", "5%"], ["1800", "18%"]] as const;
+
+/** Money earned outside room stays — day-guest meals, photoshoots, events. Lands in the cash ledger, the revenue overview and the GST sheet. */
+export function OtherIncome({ onChange }: { onChange: () => void }) {
+  const [period, setPeriod] = useState(thisPeriod());
+  const q = useLoad(() => get(`/income?period=${period}`), [period]);
+  const [f, setF] = useState({ on_date: todayIso(), category: "dining" as string, description: "", payer_name: "", amount_paise: 0, gst_rate_bp: "0", method: "cash" as string, reference: "" });
+  const save = () => run(async () => {
+    await post("/income", { ...f, gst_rate_bp: Number(f.gst_rate_bp), payer_name: f.payer_name || null, reference: f.reference || null });
+    setF({ ...f, description: "", payer_name: "", amount_paise: 0, reference: "" }); await q.reload(); onChange();
+  }, "Income recorded");
+  return <Card title="Other income" sub="meals for day guests, photoshoots, events — not room stays">
+    <details><summary>Record other income</summary>
+      <Field label="Date"><input type="date" value={f.on_date} onInput={(e: any) => setF({ ...f, on_date: e.currentTarget.value })} /></Field>
+      <Chips value={f.category} options={INCOME_CATEGORIES.map(([v, l]) => ({ value: v, label: l }))} onChange={(v) => setF({ ...f, category: v })} />
+      <Field label="What"><input value={f.description} placeholder="Lunch sadhya × 9" onInput={(e: any) => setF({ ...f, description: e.currentTarget.value })} /></Field>
+      <Field label="Who paid (optional)"><input value={f.payer_name} onInput={(e: any) => setF({ ...f, payer_name: e.currentTarget.value })} /></Field>
+      <Field label="Amount collected (₹, incl. GST)"><input inputMode="decimal" value={f.amount_paise ? String(f.amount_paise / 100) : ""} onInput={(e: any) => setF({ ...f, amount_paise: Math.round(Number(e.currentTarget.value) * 100) })} /></Field>
+      <Field label="GST"><Chips value={f.gst_rate_bp} options={GST_CHOICES.map(([v, l]) => ({ value: v, label: l }))} onChange={(v) => setF({ ...f, gst_rate_bp: v })} /></Field>
+      <Field label="Received by"><Chips value={f.method} options={METHODS.map(([v, l]) => ({ value: v, label: l }))} onChange={(v) => setF({ ...f, method: v })} /></Field>
+      <Field label="Reference (optional)"><input value={f.reference} onInput={(e: any) => setF({ ...f, reference: e.currentTarget.value })} /></Field>
+      <div class="actions end"><Btn kind="gold" disabled={f.amount_paise <= 0 || !f.description} onClick={save}>Record {inr(f.amount_paise)}</Btn></div>
+    </details>
+    <Field label="Month"><input type="month" value={period} onInput={(e: any) => setPeriod(e.currentTarget.value)} /></Field>
+    {!q.data ? <Loading error={q.error} /> : q.data.income.length === 0 ? <Empty>No other income in {period}.</Empty> : q.data.income.map((i: any) => <div class="row" key={i.id}><div><div>{i.description}{i.payer_name ? ` · ${i.payer_name}` : ""} {i.voided_at && <Status s="void" />}</div><div class="sub">{fmtDate(i.on_date)} · {i.category} · {i.method} · {i.account_name}{i.gst_paise ? ` · GST ${inr(i.gst_paise)} @ ${i.gst_rate_bp / 100}%` : " · no GST"}</div></div><div class="actions"><b class="num">{inr(i.amount_paise)}</b>{!i.voided_at && <Btn small kind="danger" onClick={() => { const reason = prompt("Void reason"); if (reason) run(async () => { await post(`/income/${i.id}/void`, { reason }); await q.reload(); onChange(); }, "Voided"); }}>Void</Btn>}</div></div>)}
+  </Card>;
 }
 
 export function Invoices({ }: { me: Me; refs: Ref }) {
