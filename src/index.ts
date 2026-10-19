@@ -21,7 +21,15 @@ import { handleEmail } from "./email/handler";
 const app = new Hono<AppEnv>();
 app.onError(errorHandler);
 
-app.get("/api/health", (c) => c.json({ ok: true, env: c.env.APP_ENV }));
+app.get("/api/health", async (c) => {
+  // Shallow by default; ?deep=1 pings D1 and R2 so a smoke test can prove the bindings work.
+  const out: Record<string, unknown> = { ok: true, env: c.env.APP_ENV };
+  if (c.req.query("deep")) {
+    try { const r = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM properties").first<{ n: number }>(); out.db = r ? "ok" : "empty"; } catch (e) { out.ok = false; out.db = String((e as Error).message); }
+    try { await c.env.FILES.head("health-probe"); out.r2 = "ok"; } catch (e) { out.ok = false; out.r2 = String((e as Error).message); }
+  }
+  return c.json(out, out.ok ? 200 : 503);
+});
 app.route("/hooks", hooks as unknown as Hono<AppEnv>);
 
 const api = new Hono<AppEnv>();

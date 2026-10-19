@@ -11,6 +11,8 @@ describe("Lead → CA", () => {
 
   it("health and identity", async () => {
     expect((await api(null, "GET", "/api/health")).json.ok).toBe(true);
+    const deep = await api(null, "GET", "/api/health?deep=1");
+    expect(deep.json).toMatchObject({ ok: true, db: "ok", r2: "ok" });
     expect((await api(null, "GET", "/api/me")).status).toBe(401);
     const me = await ok("prachi", "GET", "/api/me");
     expect(me.actor.role).toBe("sales");
