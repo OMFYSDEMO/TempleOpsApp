@@ -1,5 +1,5 @@
-import { type ComponentChildren } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { type ReactNode as ComponentChildren } from "react";
+import { useEffect, useState } from "react";
 
 export function inr(p: number | null | undefined, opts: { symbol?: boolean } = {}): string {
   if (p === null || p === undefined) return "—";
@@ -16,34 +16,34 @@ export const todayIso = () => new Date(Date.now() + 5.5 * 3600_000).toISOString(
 export const thisPeriod = () => todayIso().slice(0, 7);
 
 export function Card(p: { title?: ComponentChildren; sub?: ComponentChildren; children?: ComponentChildren; actions?: ComponentChildren; tone?: "ok" | "amb" | "bad"; class?: string }) {
-  return <section class={`card ${p.tone ?? ""} ${p.class ?? ""}`}>{(p.title || p.sub) && <header><div><h3>{p.title}</h3>{p.sub && <div class="sub">{p.sub}</div>}</div>{p.actions && <div class="actions">{p.actions}</div>}</header>}{p.children}</section>;
+  return <section className={`card ${p.tone ?? ""} ${p.class ?? ""}`}>{(p.title || p.sub) && <header><div><h3>{p.title}</h3>{p.sub && <div className="sub">{p.sub}</div>}</div>{p.actions && <div className="actions">{p.actions}</div>}</header>}{p.children}</section>;
 }
 export function Row(p: { label: ComponentChildren; value: ComponentChildren; strong?: boolean; sub?: ComponentChildren }) {
-  return <div class={`row ${p.strong ? "strong" : ""}`}><div><div>{p.label}</div>{p.sub && <div class="sub">{p.sub}</div>}</div><div class="num">{p.value}</div></div>;
+  return <div className={`row ${p.strong ? "strong" : ""}`}><div><div>{p.label}</div>{p.sub && <div className="sub">{p.sub}</div>}</div><div className="num">{p.value}</div></div>;
 }
 export function Btn(p: { onClick?: () => unknown | Promise<unknown>; children?: ComponentChildren; kind?: "primary" | "ghost" | "danger" | "gold"; disabled?: boolean; small?: boolean; type?: "button" | "submit"; title?: string }) {
   const [busy, setBusy] = useState(false);
-  return <button type={p.type ?? "button"} title={p.title} class={`btn ${p.kind ?? ""} ${p.small ? "small" : ""}`} disabled={p.disabled || busy} onClick={async () => { if (!p.onClick) return; setBusy(true); try { await p.onClick(); } finally { setBusy(false); } }}>{busy ? "…" : p.children}</button>;
+  return <button type={p.type ?? "button"} title={p.title} className={`btn ${p.kind ?? ""} ${p.small ? "small" : ""}`} disabled={p.disabled || busy} onClick={async () => { if (!p.onClick) return; setBusy(true); try { await p.onClick(); } finally { setBusy(false); } }}>{busy ? "…" : p.children}</button>;
 }
 export function Chip(p: { on?: boolean; onClick?: () => void; children?: ComponentChildren; tone?: "ok" | "amb" | "bad" | "muted" }) {
-  return <button type="button" class={`chip ${p.on ? "on" : ""} ${p.tone ?? ""}`} onClick={p.onClick}>{p.children}</button>;
+  return <button type="button" className={`chip ${p.on ? "on" : ""} ${p.tone ?? ""}`} onClick={p.onClick}>{p.children}</button>;
 }
 export function Chips<T extends string>(p: { value: T | null; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
-  return <div class="chips">{p.options.map((o) => <Chip key={o.value} on={p.value === o.value} onClick={() => p.onChange(o.value)}>{o.label}</Chip>)}</div>;
+  return <div className="chips">{p.options.map((o) => <Chip key={o.value} on={p.value === o.value} onClick={() => p.onChange(o.value)}>{o.label}</Chip>)}</div>;
 }
-export function Field(p: { label: ComponentChildren; children?: ComponentChildren; hint?: ComponentChildren }) { return <label class="field"><span>{p.label}</span>{p.children}{p.hint && <small>{p.hint}</small>}</label>; }
+export function Field(p: { label: ComponentChildren; children?: ComponentChildren; hint?: ComponentChildren }) { return <label className="field"><span>{p.label}</span>{p.children}{p.hint && <small>{p.hint}</small>}</label>; }
 export function Status(p: { s: string }) {
   const tone: Record<string, string> = { new: "amb", contacted: "", quoted: "", hold: "amb", won: "ok", lost: "bad", provisional: "amb", approved: "ok", checked_in: "ok", checked_out: "", cancelled: "bad", no_show: "bad", pending: "amb", returned: "bad", auto: "ok", open: "amb", in_progress: "", done: "ok", noted: "muted", matched: "ok", proposed: "amb", unmatched: "bad", carried: "muted", locked: "ok", filed: "ok", precleared: "amb", settled: "ok", draft: "amb", undone: "bad", duplicate: "muted", routed: "muted", dismissed: "muted", void: "bad", issued: "ok", credited: "muted" };
-  return <span class={`status ${tone[p.s] ?? ""}`}>{p.s.replace(/_/g, " ")}</span>;
+  return <span className={`status ${tone[p.s] ?? ""}`}>{p.s.replace(/_/g, " ")}</span>;
 }
-export function Empty(p: { children?: ComponentChildren }) { return <div class="empty">{p.children ?? "Nothing here."}</div>; }
+export function Empty(p: { children?: ComponentChildren }) { return <div className="empty">{p.children ?? "Nothing here."}</div>; }
 
 let toastFn: ((m: string, tone?: "ok" | "bad") => void) | null = null;
 export function toast(m: string, tone: "ok" | "bad" = "ok") { toastFn?.(m, tone); }
 export function Toaster() {
   const [t, setT] = useState<{ m: string; tone: string } | null>(null);
   useEffect(() => { toastFn = (m, tone = "ok") => { setT({ m, tone }); setTimeout(() => setT(null), 3200); }; return () => { toastFn = null; }; }, []);
-  return t ? <div class={`toast ${t.tone}`}>{t.m}</div> : null;
+  return t ? <div className={`toast ${t.tone}`}>{t.m}</div> : null;
 }
 export async function run(fn: () => Promise<unknown>, okMsg?: string) { try { const r = await fn(); if (okMsg) toast(okMsg); return r; } catch (e: any) { toast(e?.message ?? String(e), "bad"); throw e; } }
 
@@ -51,7 +51,7 @@ export async function run(fn: () => Promise<unknown>, okMsg?: string) { try { co
 export function Keypad(p: { value: number; onChange: (paise: number) => void }) {
   const digits = Math.round(p.value / 100).toString();
   const press = (k: string) => { let v = digits === "0" ? "" : digits; if (k === "⌫") v = v.slice(0, -1); else if ((v + k).length <= 8) v += k; p.onChange(Number(v || "0") * 100); };
-  return <div class="keypad"><div class="amt">₹ {Number(digits).toLocaleString("en-IN")}</div><div class="keys">{["1","2","3","4","5","6","7","8","9","00","0","⌫"].map((k) => <button type="button" key={k} onClick={() => press(k)}>{k}</button>)}</div></div>;
+  return <div className="keypad"><div className="amt">₹ {Number(digits).toLocaleString("en-IN")}</div><div className="keys">{["1","2","3","4","5","6","7","8","9","00","0","⌫"].map((k) => <button type="button" key={k} onClick={() => press(k)}>{k}</button>)}</div></div>;
 }
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []): { data: T | null; error: string | null; reload: () => Promise<void>; loading: boolean } {
   const [data, setData] = useState<T | null>(null); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(true);
@@ -59,5 +59,5 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []): { data: 
   useEffect(() => { reload(); }, deps);
   return { data, error, reload, loading };
 }
-export function Loading(p: { error?: string | null }) { return p.error ? <div class="empty bad">{p.error}</div> : <div class="empty">Loading…</div>; }
-export function Money(p: { v: number | null | undefined }) { return <span class="num">{inr(p.v)}</span>; }
+export function Loading(p: { error?: string | null }) { return p.error ? <div className="empty bad">{p.error}</div> : <div className="empty">Loading…</div>; }
+export function Money(p: { v: number | null | undefined }) { return <span className="num">{inr(p.v)}</span>; }

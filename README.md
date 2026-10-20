@@ -14,7 +14,7 @@ Pilot property: Meadows Varkala (4 rooms). Every table carries `property_id`, so
 | Inbox | Email Routing → Email Worker (`postal-mime`) parses STAAH / SwiftBook / Airpay mail; confident, consistent emails book, cancel and record payments on arrival, the rest wait with a reason |
 | Nudges | Cron Trigger every 5 min: hold & quote expiry, 15/60-minute lead nudges |
 | Auth | AVOS's own email + password login (PBKDF2, D1 sessions, secure cookie, lockout, forced change, reset links); Cloudflare Access accepted as an optional second layer. Role walls are enforced per API route. |
-| UI | Preact + Vite PWA served as Worker static assets; quick capture is offline-first with idempotency keys |
+| UI | React + Vite PWA served as Worker static assets; quick capture is offline-first with idempotency keys |
 
 ## Run locally
 

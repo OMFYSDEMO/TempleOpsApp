@@ -11,7 +11,7 @@ const listeners = new Set<() => void>();
 
 export function readQueue(): QueuedEntry[] { try { return JSON.parse(localStorage.getItem(STORE) ?? "[]"); } catch { return []; } }
 function writeQueue(q: QueuedEntry[]) { try { localStorage.setItem(STORE, JSON.stringify(q)); } catch {} listeners.forEach((l) => l()); }
-export function onQueueChange(fn: () => void) { listeners.add(fn); return () => listeners.delete(fn); }
+export function onQueueChange(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; }
 
 export function newKey(): string { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`; }
 

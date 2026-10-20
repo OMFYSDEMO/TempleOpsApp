@@ -1,4 +1,4 @@
-import type { JSX } from "preact";
+import type { ReactElement } from "react";
 
 /** Line icons (24×24, stroke = currentColor) for navigation and the shell. Paths follow the Lucide style. */
 const PATHS: Record<string, string> = {
@@ -29,6 +29,6 @@ const PATHS: Record<string, string> = {
   cloud: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
 };
 
-export function Icon({ name, size = 18, class: cls }: { name: string; size?: number; class?: string }): JSX.Element {
-  return <svg class={`ico ${cls ?? ""}`} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: PATHS[name] ?? PATHS.grid }} />;
+export function Icon({ name, size = 18, class: cls }: { name: string; size?: number; class?: string }): ReactElement {
+  return <svg className={`ico ${cls ?? ""}`} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: PATHS[name] ?? PATHS.grid }} />;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useState } from "react";
 import { get, post, devUser, setDevUser } from "./api";
 import { Toaster, Empty, fmtDateTime, fmtDate, toast, Btn } from "./ui";
 import { readQueue, onQueueChange, flush } from "./offline";
@@ -56,9 +56,9 @@ export function App() {
 
   const resetToken = hash.startsWith("reset?") ? new URLSearchParams(hash.slice(6)).get("token") : null;
   if (resetToken) return <><ResetPassword token={resetToken} onDone={() => { location.hash = ""; load(); }} /><Toaster /></>;
-  if (err) return <div style="padding:24px"><h2>AVOS</h2><p class="muted">{err}</p><Btn onClick={load}>Retry</Btn></div>;
+  if (err) return <div style={{ padding: "24px" }}><h2>AVOS</h2><p className="muted">{err}</p><Btn onClick={load}>Retry</Btn></div>;
   if (signedOut) return <><Login onSignedIn={load} devUsers={appEnv && appEnv !== "production" ? DEV_USERS : undefined} onDevUser={(u) => { setDevUser(u || null); load(); }} /><Toaster /></>;
-  if (!me || !ref) return <div class="empty">Loading…</div>;
+  if (!me || !ref) return <div className="empty">Loading…</div>;
   if (me.must_change_password || changePw) return <><ChangePassword forced={!!me.must_change_password} hasPassword={!!me.has_password} onDone={() => { setChangePw(false); load(); }} /><Toaster /></>;
   const visible = SCREENS.filter((s) => me.capabilities.includes(s.cap));
   const current = visible.find((s) => s.key === hash) ?? visible[0];
@@ -68,32 +68,32 @@ export function App() {
   const initials = me.actor.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const roleNote = LOCK[me.actor.role];
   return <>
-    <div class="shell">
-      <nav class="side">
-        <a class="brand" href="#"><span class="mark">A</span><span><b>AVOS</b><small>{me.property.name}</small></span></a>
-        {groups.map((g) => <div key={g}><div class="grp">{g}</div>{visible.filter((s) => s.group === g).map((s) => <a key={s.key} href={`#${s.key}`} class={`item ${s.key === current.key ? "on" : ""}`}><Icon name={s.icon} />{s.label}</a>)}</div>)}
-        <div class="foot"><b>{me.actor.role.charAt(0).toUpperCase() + me.actor.role.slice(1)} access</b>{roleNote}</div>
+    <div className="shell">
+      <nav className="side">
+        <a className="brand" href="#"><span className="mark">A</span><span><b>AVOS</b><small>{me.property.name}</small></span></a>
+        {groups.map((g) => <div key={g}><div className="grp">{g}</div>{visible.filter((s) => s.group === g).map((s) => <a key={s.key} href={`#${s.key}`} className={`item ${s.key === current.key ? "on" : ""}`}><Icon name={s.icon} />{s.label}</a>)}</div>)}
+        <div className="foot"><b>{me.actor.role.charAt(0).toUpperCase() + me.actor.role.slice(1)} access</b>{roleNote}</div>
       </nav>
-      <div class="content">
-        <div class="topbar">
-          <a class="mbrand" href="#"><span class="mark">A</span>AVOS</a>
-          <div class="where"><Icon name="house" size={16} /><b>{me.property.name}</b><span>· {fmtDate(me.property.today)}</span></div>
-          <div class="spacer" />
-          {queued > 0 && <span class="queue">{queued} pending sync</span>}
-          <button class="iconbtn" onClick={openNotifs} title="Notifications"><Icon name="bell" />{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
-          <details class="usermenu"><summary><span class="avatar">{initials}</span><span>{me.actor.name}</span><span class="role">· {me.actor.role}</span><Icon name="chevron" size={14} /></summary><div>
-            <div class="sub">{me.actor.email}</div>
+      <div className="content">
+        <div className="topbar">
+          <a className="mbrand" href="#"><span className="mark">A</span>AVOS</a>
+          <div className="where"><Icon name="house" size={16} /><b>{me.property.name}</b><span>· {fmtDate(me.property.today)}</span></div>
+          <div className="spacer" />
+          {queued > 0 && <span className="queue">{queued} pending sync</span>}
+          <button className="iconbtn" onClick={openNotifs} title="Notifications"><Icon name="bell" />{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
+          <details className="usermenu"><summary><span className="avatar">{initials}</span><span>{me.actor.name}</span><span className="role">· {me.actor.role}</span><Icon name="chevron" size={14} /></summary><div>
+            <div className="sub">{me.actor.email}</div>
             {me.actor.via !== "access" && <button onClick={() => setChangePw(true)}><Icon name="lock" size={16} />Change password</button>}
             <button onClick={signOut}><Icon name="logout" size={16} />Sign out</button>
-            {devUser() && appEnv !== "production" && <div class="sub"><label>Dev user <select value={devUser() ?? ""} onChange={(e: any) => { setDevUser(e.currentTarget.value); location.hash = ""; load(); }}>{DEV_USERS.map((u) => <option value={u}>{u.split("@")[0]}</option>)}</select></label></div>}
+            {devUser() && appEnv !== "production" && <div className="sub"><label>Dev user <select value={devUser() ?? ""} onChange={(e: any) => { setDevUser(e.currentTarget.value); location.hash = ""; load(); }}>{DEV_USERS.map((u) => <option value={u}>{u.split("@")[0]}</option>)}</select></label></div>}
           </div></details>
         </div>
         <main><Comp me={me} refs={ref} /></main>
       </div>
     </div>
-    <nav class="mobile-nav">{visible.filter((s) => s.mobile).slice(0, 5).map((s) => <a key={s.key} href={`#${s.key}`} class={s.key === current.key ? "on" : ""}><Icon name={s.icon} size={20} />{s.label.split(" ")[0]}</a>)}</nav>
+    <nav className="mobile-nav">{visible.filter((s) => s.mobile).slice(0, 5).map((s) => <a key={s.key} href={`#${s.key}`} className={s.key === current.key ? "on" : ""}><Icon name={s.icon} size={20} />{s.label.split(" ")[0]}</a>)}</nav>
     {me.capabilities.includes("tasks") && <QuickCapture me={me} refs={ref} />}
-    {notifOpen && <div class="sheet" onClick={() => setNotifOpen(false)}><div onClick={(e) => e.stopPropagation()}><h3>Notifications</h3>{notifs.length === 0 ? <Empty>No notifications.</Empty> : notifs.map((n) => <div class="row" key={n.id}><div><div>{n.message}</div><div class="sub">{fmtDateTime(n.created_at)}</div></div></div>)}</div></div>}
+    {notifOpen && <div className="sheet" onClick={() => setNotifOpen(false)}><div onClick={(e) => e.stopPropagation()}><h3>Notifications</h3>{notifs.length === 0 ? <Empty>No notifications.</Empty> : notifs.map((n) => <div className="row" key={n.id}><div><div>{n.message}</div><div className="sub">{fmtDateTime(n.created_at)}</div></div></div>)}</div></div>}
     <Toaster />
   </>;
 }
