@@ -1,0 +1,39 @@
+# Sends one test lead to the CRM hook on the live app, the way NeoDove would, and shows what AVOS did with it.
+# Needs the HOOK_SECRET repository secret. The lead it creates is named "Hook test" so it can be deleted afterwards.
+name: Hook test
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        default: app.shajianandan.com
+        required: true
+      source:
+        description: lead source to send (instagram, facebook, whatsapp, website)
+        default: whatsapp
+        required: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post a NeoDove-style lead and read it back
+        env:
+          HOST: ${{ github.event.inputs.host }}
+          SRC: ${{ github.event.inputs.source }}
+          HOOK_SECRET: ${{ secrets.HOOK_SECRET }}
+        run: |
+          set -u
+          if [ -z "$HOOK_SECRET" ]; then echo "::error::HOOK_SECRET is not set as a repository secret (Settings → Secrets and variables → Actions → Secrets)."; exit 1; fi
+          echo "HOOK_SECRET present: yes (${#HOOK_SECRET} characters)"
+          echo "== wrong key must be refused"
+          curl -sS -m 20 -o /tmp/b -w "HTTP %{http_code}\n" -X POST -H "content-type: application/json" --data '{"name":"x","phone":"1"}' "https://$HOST/hooks/leads/neodove?key=wrong"; cat /tmp/b; echo
+          echo "== test lead, shaped like a NeoDove delivery"
+          STAMP=$(date +%s)
+          curl -sS -m 20 -o /tmp/b -w "HTTP %{http_code}\n" -X POST -H "content-type: application/json" \
+            --data "{\"lead_id\":\"HOOKTEST-$STAMP\",\"name\":\"Hook test\",\"mobile\":\"9000000000\",\"source\":\"$SRC\",\"campaign\":\"Hook test\",\"disposition\":\"Interested\",\"agent_name\":\"GitHub\",\"remarks\":\"automated test from the Hook test workflow; delete me\"}" \
+            "https://$HOST/hooks/leads/neodove?key=$HOOK_SECRET"; cat /tmp/b; echo
+          echo "== the same lead again must not make a second card"
+          curl -sS -m 20 -o /tmp/b -w "HTTP %{http_code}\n" -X POST -H "content-type: application/json" \
+            --data "{\"lead_id\":\"HOOKTEST-$STAMP\",\"name\":\"Hook test\",\"mobile\":\"9000000000\",\"source\":\"$SRC\",\"disposition\":\"Quote requested\"}" \
+            "https://$HOST/hooks/leads/neodove?key=$HOOK_SECRET"; cat /tmp/b; echo
+          echo "== last deliveries as AVOS saw them"
+          curl -sS -m 20 "https://$HOST/hooks/leads/crm/recent?key=$HOOK_SECRET" | head -c 3000; echo
