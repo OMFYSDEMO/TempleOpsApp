@@ -1,7 +1,7 @@
 import { rupeesToPaise } from "../domain/money";
 import { parseLooseDate } from "../domain/dates";
 
-export const PARSER_VERSION = "2026-10-2";
+export const PARSER_VERSION = "2026-10-3";
 
 export interface ParsedEmail {
   source: "staah" | "swiftbook" | "airpay" | "unknown";
@@ -58,9 +58,11 @@ export function parseStaah(rawSubject: string, body: string, year: number): Pars
     ?? grab(body, /(?:Channel|Source|OTA)\s*:?\s*([A-Za-z.\- ]+?)(?:\n|Ref|Guest|$)/i)
     ?? grab(subject, /(Booking\.com|Agoda|Expedia|MakeMyTrip|Goibibo|Airbnb|Cleartrip|Yatra)/i);
   // Booking Id#: <OTA reference> (<STAAH reservation id>). The STAAH id is the one that stays stable across OTAs.
-  const ids = body.match(/Booking\s*Id#?\s*:?\s*([A-Za-z0-9\-]+)\s*\((\d{6,})\)/i) ?? subject.match(/Reservation\s*No\.?\s*:?\s*([A-Za-z0-9\-]+)\s*\((\d{6,})\)/i);
-  const ref = ids ? ids[2] : grab(body, /(?:Ref(?:erence)?|Reservation (?:ID|No\.?)|Booking (?:ID|No\.?))\s*:?\s*#?\s*([0-9]{6,})/i);
-  const otaRef = ids ? ids[1] : null;
+  const ids = body.match(/Booking\s*Id#?\s*:?\s*([A-Za-z0-9\-]+)\s*\(([A-Za-z0-9\-]{6,})\)/i) ?? subject.match(/Reservation\s*No\.?\s*:?\s*([A-Za-z0-9\-]+)\s*\(([A-Za-z0-9\-]{6,})\)/i);
+  // The subject and the body list the two ids in opposite orders; the STAAH id is the long all-digit one (16 digits).
+  const pair = ids ? [ids[1], ids[2]] : null;
+  const ref = pair ? (pair.find((x) => /^\d{14,}$/.test(x)) ?? pair[1]) : grab(body, /(?:Ref(?:erence)?|Reservation (?:ID|No\.?)|Booking (?:ID|No\.?))\s*:?\s*#?\s*([0-9]{6,})/i);
+  const otaRef = pair ? (pair.find((x) => x !== ref) ?? null) : null;
   const guest = grab(body, /GUEST NAME\s*\n?\s*([^\n]+)/i) ?? grab(body, /CONTACT NAME\s*\n?\s*([^\n]+)/i) ?? grab(body, /Guest(?: Name)?\s*:?\s*([^\n·]+?)(?:\s*·|\n|$)/i) ?? grab(subject, /for\s+(.+?)\s+Reservation\s*No/i);
   const roomFull = grab(body, /ROOM TYPE\s*\n?\s*([^\n]+)/i) ?? grab(body, /Room(?: Type)?\s*:?\s*([A-Za-z][A-Za-z ]*?)\s*(?:×|x|\n|·)/i);
   const room = roomFull ? roomFull.split(/\s+-\s+|\s*\(/)[0].trim() : null;
