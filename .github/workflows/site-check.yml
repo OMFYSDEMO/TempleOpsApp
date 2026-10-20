@@ -1,0 +1,26 @@
+# Diagnostic: what a visitor and the login API return, seen from outside Cloudflare's network.
+name: Site check
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        default: avos.shajianandan.com
+        required: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch the app and its API as an anonymous visitor
+        env:
+          HOST: ${{ github.event.inputs.host }}
+        run: |
+          set -u
+          for path in / /api/health /api/auth/session /index.html; do
+            echo "== GET https://$HOST$path"
+            curl -sS -m 20 -D - -o /tmp/body "https://$HOST$path" | grep -i -E "^HTTP|^location|^content-type|^cf-|^set-cookie|^server" || true
+            echo "-- body (first 400 chars):"; head -c 400 /tmp/body; echo; echo
+          done
+          echo "== POST https://$HOST/api/auth/login with a wrong password (expect 401 json)"
+          curl -sS -m 20 -D - -o /tmp/body -H "content-type: application/json" --data '{"email":"nobody@example.com","password":"wrong-password"}' "https://$HOST/api/auth/login" | grep -i -E "^HTTP|^content-type" || true
+          head -c 400 /tmp/body; echo
+          echo "== DNS"; dig +short "$HOST" A; dig +short "$HOST" CNAME; dig +short "${HOST#*.}" MX
