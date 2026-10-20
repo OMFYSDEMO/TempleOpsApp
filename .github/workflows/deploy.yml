@@ -75,4 +75,4 @@ jobs:
         run: bash scripts/smoke.sh https://avos.shajianandan.workers.dev kshetrom.cloudflareaccess.com
 
       - name: Smoke test the custom domain
-        run: bash scripts/smoke.sh https://avos.shajianandan.com kshetrom.cloudflareaccess.com
+        run: bash scripts/smoke.sh https://app.shajianandan.com kshetrom.cloudflareaccess.com

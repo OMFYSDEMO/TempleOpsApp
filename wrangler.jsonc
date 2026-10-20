@@ -44,7 +44,12 @@
       "triggers": { "crons": ["*/5 * * * *"] },
       "observability": { "enabled": true },
       // Inbound email: Email Routing sends inbox@<domain> to this Worker's email() handler (docs/deploy-cloudflare.md step 8).
-      "routes": [{ "pattern": "avos.shajianandan.com", "custom_domain": true }],
+      // app.shajianandan.com is the working address. avos.shajianandan.com is kept, but a Cloudflare Access application
+      // left over from the pilot still intercepts it and the Access API is unavailable to remove it (Oct 2026).
+      "routes": [
+        { "pattern": "app.shajianandan.com", "custom_domain": true },
+        { "pattern": "avos.shajianandan.com", "custom_domain": true }
+      ],
       // Keep the workers.dev address too: the deploy smoke test uses it, and zone security rules never apply there.
       "workers_dev": true,
       "vars": {
