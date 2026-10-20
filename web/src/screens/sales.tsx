@@ -138,9 +138,36 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
       {detail.data.rooms.map((r: any) => <Row key={r.id} label={`${r.room_name} · ${r.nights} night(s) @ ${inr(r.nightly_rate_paise)}${r.tariff_rate_paise ? ` (tariff ${inr(r.tariff_rate_paise)})` : ""} · GST ${r.gst_rate_bp / 100}%`} value={inr(r.room_total_paise + r.gst_paise)} />)}
       <Row strong label="Gross" value={inr(detail.data.booking.gross_paise)} /><Row label="Paid" value={inr(detail.data.paid_paise)} /><Row strong label="Balance" value={inr(detail.data.balance_paise)} />
       {detail.data.approvals.map((a: any) => <div class="muted" key={a.id}>Approval: <Status s={a.status} /> {a.note}</div>)}
-      <details><summary>Audit trail ({detail.data.audit.length})</summary>{detail.data.audit.map((a: any) => <div class="muted" key={a.id}>{a.at} · {a.actor_email} · {a.action}</div>)}</details>
+      {detail.data.booking.notes && <div class="sub" style="white-space:pre-line;margin-top:6px">{detail.data.booking.notes}</div>}
+      <details><summary>Audit trail ({detail.data.audit.length})</summary>{detail.data.audit.map((a: any) => <div class="muted" key={a.id}>{a.at} · {a.actor_email} · {a.action}{a.action === "booking.amend" && a.after_json ? ` · ${JSON.parse(a.after_json).remark ?? ""}` : ""}</div>)}</details>
     </Card>}
+    {open && detail.data && ["provisional", "approved", "checked_in"].includes(detail.data.booking.status) && <Amend key={open} d={detail.data} rooms={rooms} refs={refs} tariffFor={tariffFor} onDone={async () => { await Promise.all([q.reload(), detail.reload()]); }} />}
   </>;
+}
+
+/** Correct a booking in place: room exchange, dates, rates, guest, channel. A remark is required and lands in the audit trail. */
+function Amend({ d, rooms, refs, tariffFor, onDone }: { d: any; rooms: Ref["locations"]; refs: Ref; tariffFor: (roomId: string, night: string) => number | null; onDone: () => Promise<void> }) {
+  const cur: Record<string, string> = {}; for (const r of d.rooms) cur[r.room_id] = String(r.nightly_rate_paise / 100);
+  const [a, setA] = useState<any>({ guest_name: d.guest.name, guest_phone: d.guest.phone ?? "", check_in: d.booking.check_in, check_out: d.booking.check_out, adults: d.booking.adults, children: d.booking.children, channel_code: d.channel.code, rooms: cur, remark: "" });
+  const chosen = Object.entries(a.rooms as Record<string, string>).filter(([, v]) => v !== "");
+  const changed = a.guest_name !== d.guest.name || a.guest_phone !== (d.guest.phone ?? "") || a.check_in !== d.booking.check_in || a.check_out !== d.booking.check_out || a.adults !== d.booking.adults || a.children !== d.booking.children || a.channel_code !== d.channel.code || JSON.stringify(a.rooms) !== JSON.stringify(cur);
+  const save = () => run(async () => {
+    const r = await post(`/bookings/${d.booking.id}/amend`, { ...a, rooms: chosen.map(([room_id, v]) => ({ room_id, nightly_rate_paise: Math.round(Number(v) * 100) })) });
+    toast(r.booking.needsApproval ? `Amended · awaiting approval (${r.booking.approval.reasons.join(", ")})` : "Amended · audited · front desk notified");
+    await onDone();
+  });
+  return <Card title="Amend this booking" sub="room exchange, dates, rate, guest or channel · say why in the remark; the change is audited and the front desk is told">
+    <div class="grid two">
+      <Field label="Guest"><input value={a.guest_name} onInput={(e: any) => setA({ ...a, guest_name: e.currentTarget.value })} /></Field><Field label="Phone"><input inputMode="tel" value={a.guest_phone} onInput={(e: any) => setA({ ...a, guest_phone: e.currentTarget.value })} /></Field>
+      <Field label="Check-in"><input type="date" value={a.check_in} onInput={(e: any) => setA({ ...a, check_in: e.currentTarget.value })} /></Field><Field label="Check-out"><input type="date" value={a.check_out} onInput={(e: any) => setA({ ...a, check_out: e.currentTarget.value })} /></Field>
+      <Field label="Channel"><select value={a.channel_code} onChange={(e: any) => setA({ ...a, channel_code: e.currentTarget.value })}>{refs.channels.map((c) => <option value={c.code}>{c.name}</option>)}</select></Field>
+      <div class="grid two"><Field label="Adults"><input type="number" min="1" value={a.adults} onInput={(e: any) => setA({ ...a, adults: Number(e.currentTarget.value) })} /></Field><Field label="Children"><input type="number" min="0" value={a.children} onInput={(e: any) => setA({ ...a, children: Number(e.currentTarget.value) })} /></Field></div>
+    </div>
+    <div class="sub">Rooms · nightly rate ex-GST · clear a box to release that room, fill one to move in</div>
+    <div class="grid">{rooms.map((r) => { const t = tariffFor(r.id, a.check_in); const on = (a.rooms[r.id] ?? "") !== ""; return <Field key={r.id} label={`${r.name}${t ? ` · tariff ${inr(t)}` : ""}${on ? " · in this booking" : ""}`}><div class="actions"><input inputMode="decimal" placeholder="— not in this booking —" value={a.rooms[r.id] ?? ""} onInput={(e: any) => setA({ ...a, rooms: { ...a.rooms, [r.id]: e.currentTarget.value } })} />{t && !on && <Btn small onClick={() => setA({ ...a, rooms: { ...a.rooms, [r.id]: String(t / 100) } })}>add at tariff</Btn>}{on && <Btn small onClick={() => setA({ ...a, rooms: { ...a.rooms, [r.id]: "" } })}>remove</Btn>}</div></Field>; })}</div>
+    <Field label="Remark (required)" hint="what was wrong and what changed, e.g. Cleartrip mapped the room type wrongly; moved to Superior"><input value={a.remark} onInput={(e: any) => setA({ ...a, remark: e.currentTarget.value })} /></Field>
+    <div class="actions end"><Btn kind="primary" disabled={!changed || a.remark.trim().length < 3 || chosen.length === 0} onClick={save}>Save amendment</Btn></div>
+  </Card>;
 }
 
 export function Availability({ refs }: { me: Me; refs: Ref }) {

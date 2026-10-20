@@ -1,7 +1,7 @@
 import { newRouter, requireCap, body, str, optStr, int, date, oneOf } from "../app";
 import { Batch, HttpError, all, one, id, assertPeriodOpen } from "../db";
 import { nowIso, todayIn } from "../domain/dates";
-import { createBooking, cancelBooking, loadBooking, paidOnBooking } from "../services/bookings";
+import { createBooking, cancelBooking, loadBooking, paidOnBooking , amendBooking } from "../services/bookings";
 import { allowed } from "../auth";
 
 const r = newRouter();
@@ -92,6 +92,21 @@ r.patch("/:id", requireCap("bookings_write"), async (c) => {
   b.audit("booking.update", "booking", bk.id, Object.fromEntries(Object.keys(after).map((k) => [k, (bk as any)[k]])), after);
   await b.run();
   return c.json({ ok: true });
+});
+
+/** Amend in place with a remark: room exchange, dates, rates, guest, channel. Sales, revenue and the owner. */
+r.post("/:id/amend", requireCap("bookings_write"), async (c) => {
+  const p = c.get("property"); const actor = c.get("actor");
+  const x = await body(c);
+  const rooms = Array.isArray(x.rooms) ? (x.rooms as { room_id: string; nightly_rate_paise: number }[]).map((rm) => ({ roomId: str(rm.room_id, "rooms[].room_id"), nightlyRatePaise: int(rm.nightly_rate_paise, "rooms[].nightly_rate_paise", { min: 0 }) })) : undefined;
+  const res = await amendBooking(c.env.DB, actor, p, c.req.param("id"), {
+    rooms, checkIn: x.check_in === undefined ? undefined : date(x.check_in, "check_in"), checkOut: x.check_out === undefined ? undefined : date(x.check_out, "check_out"),
+    guestName: x.guest_name === undefined ? undefined : optStr(x.guest_name, "guest_name"), guestPhone: x.guest_phone === undefined ? undefined : optStr(x.guest_phone, "guest_phone"),
+    adults: x.adults === undefined ? undefined : int(x.adults, "adults", { min: 1 }), children: x.children === undefined ? undefined : int(x.children, "children", { min: 0 }),
+    channelCode: optStr(x.channel_code, "channel_code") ?? undefined, externalRef: x.external_ref === undefined ? undefined : optStr(x.external_ref, "external_ref"),
+    remark: str(x.remark, "remark"),
+  });
+  return c.json({ booking: res });
 });
 
 r.delete("/:id", requireCap("bookings_write"), async (c) => {
