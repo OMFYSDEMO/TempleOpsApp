@@ -41,6 +41,7 @@ Locally there is no login wall: send the header `x-dev-user: <email of a seeded 
 - `web/src/ui.tsx` holds the small component kit (Card, Row, Btn, Chips, Field, Status, Keypad, `useLoad`, `run`, `toast`) and formatting (`inr`, `fmtDate`).
 - `web/src/screens/` one file per area: `sales.tsx` (leads, inbox, reservations, availability), `property.tsx` (front desk, payments, invoices, tasks, expenses), `management.tsx` (approvals, payouts, reconcile, reports, dashboard, admin, close, GST, audit), `ids.tsx` (guest IDs, Form C, Drive settings), `auth.tsx`.
 - Money accounts: `defaultBank()` / `bankAccount()` in `src/db.ts`; owner CRUD under `/api/admin/accounts`; `BankPick` in `web/src/ui.tsx` renders only when there is more than one bank.
+- CRM lead hook: `mapCrmLead()` and `/hooks/leads/neodove` (alias `/hooks/leads/crm`) in `src/routes/hooks.ts`; deliveries land in `hook_deliveries` for tuning; `/hooks/leads/crm/recent` lists the last 20.
 - Marketing scorecard: `marketingScorecard()` in `src/services/reports.ts`, served at `/api/reports/marketing`; campaign fields come in on leads (website UTM, Meta `campaign_name`/`ad_name`, or typed) and on expenses. Screen in `web/src/screens/marketing.tsx`.
 - Guest IDs: `src/routes/ids.ts` (capture, view, Form C), `src/services/drive.ts` (Google OAuth, Drive client, the 48-hour archive run from `src/cron.ts`); process and setup in `docs/guest-ids.md`.
 

@@ -136,7 +136,15 @@ Once mail reaches the Worker, the inbox runs itself: a STAAH reservation books t
 
 The parsers were written against the common STAAH, SwiftBook and Airpay templates; every email's raw `.eml` is kept in R2 (`inbox/…`), so when a template differs, nothing is lost: the card shows what was read, a person corrects it, and the parser can be tuned from the stored sample.
 
-## 9. Lead hooks (website form, Instagram and Facebook lead forms)
+## 9. Lead hooks (CRM, website form, Instagram and Facebook lead forms)
+
+**If a CRM such as NeoDove already receives Instagram, Facebook, WhatsApp and website enquiries, use it as the only front door** and skip the Meta app below: wiring both would open every lead twice. In the CRM's admin portal → Integrations → Webhook, add a webhook on *lead created* and *lead updated* (or on the stage you consider a real enquiry, such as "Interested" or "Quote requested") with method POST and this URL:
+
+```
+https://app.shajianandan.com/hooks/leads/neodove?key=<HOOK_SECRET>
+```
+
+The payload can be the CRM's own shape. AVOS reads the usual names for name, phone, email, source, campaign, lead id, stage, agent, remarks, check-in, check-out and rooms, keeps every delivery verbatim, and never opens a second card for the same CRM lead id or for the same phone within 30 days (a later delivery adds the stage to the existing card instead). To see the last 20 deliveries and what became of them, open `https://app.shajianandan.com/hooks/leads/crm/recent?key=<HOOK_SECRET>` in a browser; send the owner's developer that page if a field is not being read. Add `&source=whatsapp` (or instagram, facebook, website) to the URL for a CRM that does not send the source itself.
 
 Every enquiry becomes a lead card assigned to the sales desk, with a notification, and WhatsApp quotes go out from the card. Three repository secrets drive it (GitHub → Settings → Secrets and variables → Actions → New repository secret); the deploy pushes each one to the Worker.
 

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
-import { Batch, HttpError, one, id } from "../db";
+import { Batch, HttpError, one, id, all } from "../db";
 import { normalisePhone } from "../domain/ids";
 import { notifyRole } from "../services/notify";
 
@@ -46,6 +46,92 @@ r.post("/leads/website", async (c) => {
   if (!x.name) throw new HttpError(400, "name required");
   const res = await createLeadFromHook(c.env, propertyId, { campaign: x.campaign ?? x.utm_campaign ?? null, utm_source: x.utm_source ?? null, utm_medium: x.utm_medium ?? null, ad_name: x.utm_content ?? x.ad ?? null, source: "website", name: String(x.name), phone: x.phone, email: x.email, check_in: x.check_in, check_out: x.check_out, rooms: x.rooms ? Number(x.rooms) : null, adults: x.adults ? Number(x.adults) : null, notes: x.message ?? x.notes ?? null });
   return c.json(res, res.duplicate ? 200 : 201);
+});
+
+/**
+ * CRM webhook (NeoDove and the like). The CRM is the front door for Instagram, Facebook, WhatsApp and the
+ * website; when it marks an enquiry worth a quote it posts here and AVOS opens the lead card. The payload
+ * shape is the CRM's own, so the mapper reads the usual names for each field and the delivery is kept
+ * verbatim in hook_deliveries for tuning. Dedupe: the CRM's lead id, then an open lead on the same phone
+ * within 30 days (that one is updated with the latest note instead of duplicated).
+ */
+const CRM_SOURCES: Record<string, string> = { instagram: "instagram", ig: "instagram", insta: "instagram", facebook: "facebook", fb: "facebook", meta: "facebook", whatsapp: "whatsapp", wa: "whatsapp", website: "website", web: "website", site: "website", "google ads": "website", google: "website", phone: "phone", call: "phone", ivr: "phone", walkin: "walkin", "walk-in": "walkin", referral: "other", justdial: "other", indiamart: "other" };
+
+/** Flattens nested objects one level and lower-cases keys so "customer.mobile" or "Lead Name" can be looked up by a list of candidates. */
+function flat(x: any, prefix = "", out: Record<string, unknown> = {}): Record<string, unknown> {
+  if (!x || typeof x !== "object") return out;
+  for (const [k, v] of Object.entries(x)) {
+    const key = (prefix ? `${prefix}.${k}` : k).toLowerCase().replace(/[\s-]+/g, "_");
+    if (v && typeof v === "object" && !Array.isArray(v)) { flat(v, key, out); out[key] = v; }
+    else if (Array.isArray(v)) { out[key] = v; v.forEach((it, i) => { if (it && typeof it === "object") flat(it, `${key}.${i}`, out); }); }
+    else out[key] = v;
+  }
+  return out;
+}
+const pickKey = (f: Record<string, unknown>, ...names: string[]): string | null => {
+  for (const n of names) { for (const [k, v] of Object.entries(f)) { if ((k === n || k.endsWith(`.${n}`)) && v !== null && v !== undefined && String(v).trim() !== "" && typeof v !== "object") return String(v).trim(); } }
+  return null;
+};
+
+export function mapCrmLead(payload: any, fallbackSource: string | null) {
+  const f = flat(payload);
+  const first = pickKey(f, "first_name", "firstname"), last = pickKey(f, "last_name", "lastname");
+  const name = pickKey(f, "name", "full_name", "fullname", "customer_name", "lead_name", "contact_name", "client_name") ?? [first, last].filter(Boolean).join(" ");
+  const phone = pickKey(f, "phone", "mobile", "phone_number", "mobile_number", "contact_number", "contact", "whatsapp", "whatsapp_number", "customer_mobile", "phone_no", "mobile_no");
+  const email = pickKey(f, "email", "email_id", "customer_email");
+  const rawSource = (pickKey(f, "source", "lead_source", "channel", "platform", "origin", "medium") ?? fallbackSource ?? "other").toLowerCase();
+  const source = CRM_SOURCES[rawSource] ?? (Object.entries(CRM_SOURCES).find(([k]) => rawSource.includes(k))?.[1] ?? "other");
+  const campaign = pickKey(f, "campaign", "campaign_name", "utm_campaign", "ad_campaign", "lead_campaign", "campaign_title");
+  const adName = pickKey(f, "ad_name", "ad", "utm_content", "adset_name", "creative");
+  const externalRef = pickKey(f, "lead_id", "id", "leadid", "external_id", "neodove_lead_id", "uid", "reference");
+  const checkIn = pickKey(f, "check_in", "checkin", "check_in_date", "arrival", "arrival_date", "from_date");
+  const checkOut = pickKey(f, "check_out", "checkout", "check_out_date", "departure", "departure_date", "to_date");
+  const rooms = pickKey(f, "rooms", "no_of_rooms", "number_of_rooms", "room_count");
+  const adults = pickKey(f, "adults", "guests", "no_of_guests", "pax", "number_of_guests");
+  const disposition = pickKey(f, "disposition", "status", "stage", "lead_status", "lead_stage", "sub_disposition");
+  const agent = pickKey(f, "agent", "agent_name", "assigned_to", "owner", "telecaller", "user_name");
+  const message = pickKey(f, "message", "notes", "note", "remarks", "remark", "comment", "comments", "requirement", "requirements", "description", "query");
+  const notes = [message, disposition ? `CRM stage: ${disposition}` : null, agent ? `CRM agent: ${agent}` : null, rawSource !== source ? `CRM source: ${rawSource}` : null].filter(Boolean).join(" · ") || null;
+  const isoDate = (s: string | null) => { if (!s) return null; const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/) ?? null; if (m) return `${m[1]}-${m[2]}-${m[3]}`; const d = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/); return d ? `${d[3]}-${d[2].padStart(2, "0")}-${d[1].padStart(2, "0")}` : null; };
+  return { name: name || null, phone, email, source, campaign, ad_name: adName, utm_source: pickKey(f, "utm_source"), utm_medium: pickKey(f, "utm_medium"), external_ref: externalRef, check_in: isoDate(checkIn), check_out: isoDate(checkOut), rooms: rooms ? Number(rooms) || null : null, adults: adults ? Number(adults) || null : null, notes, disposition };
+}
+
+async function crmHook(c: any, hook: string) {
+  const propertyId = gate(c);
+  const ct = c.req.header("content-type") ?? "";
+  let payload: any;
+  try { payload = ct.includes("json") ? await c.req.json() : Object.fromEntries((await c.req.formData()).entries()); } catch { throw new HttpError(400, "body must be JSON or form fields"); }
+  const m = mapCrmLead(payload, c.req.query("source") ?? null);
+  const did = id("hkd");
+  const record = async (outcome: string, leadId: string | null, note: string | null) => {
+    await c.env.DB.prepare("INSERT INTO hook_deliveries (id, property_id, hook, payload_json, lead_id, outcome, note) VALUES (?,?,?,?,?,?,?)").bind(did, propertyId, hook, JSON.stringify(payload).slice(0, 20_000), leadId, outcome, note).run();
+  };
+  if (!m.name && !m.phone) { await record("skipped:no name or phone", null, null); return c.json({ ok: false, skipped: "no name or phone in the payload", delivery: did }, 202); }
+  const phone = normalisePhone(m.phone);
+  // Same CRM lead again (an update) → refresh the note on the open lead; never a second card.
+  let existing: any = m.external_ref ? await one(c.env.DB, "SELECT id, status, notes FROM leads WHERE property_id = ? AND external_ref = ? AND source = ?", propertyId, `${hook}:${m.external_ref}`, m.source) : null;
+  if (!existing && phone) existing = await one(c.env.DB, "SELECT id, status, notes FROM leads WHERE property_id = ? AND guest_id IN (SELECT id FROM guests WHERE property_id = ? AND phone = ?) AND status NOT IN ('won','lost') AND created_at >= datetime('now', '-30 days') ORDER BY created_at DESC LIMIT 1", propertyId, propertyId, phone);
+  if (existing) {
+    const b = new Batch(c.env.DB, null);
+    const addition = [m.disposition ? `CRM stage: ${m.disposition}` : null, m.notes && !(existing.notes ?? "").includes(m.notes) ? m.notes : null].filter(Boolean).join(" · ");
+    if (addition) b.add("UPDATE leads SET notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END, campaign = COALESCE(campaign, ?), updated_at = datetime('now') WHERE id = ?", addition, addition, m.campaign, existing.id);
+    else b.add("UPDATE leads SET campaign = COALESCE(campaign, ?), updated_at = datetime('now') WHERE id = ?", m.campaign, existing.id);
+    b.audit("lead.crm_update", "lead", existing.id, null, { via: hook, disposition: m.disposition });
+    await b.run();
+    await record(addition ? "updated" : "duplicate", existing.id, null);
+    return c.json({ id: existing.id, duplicate: true, delivery: did }, 200);
+  }
+  const res = await createLeadFromHook(c.env, propertyId, { source: m.source, name: m.name ?? `CRM lead ${m.phone ?? ""}`.trim(), phone: m.phone, email: m.email, check_in: m.check_in, check_out: m.check_out, rooms: m.rooms, adults: m.adults, notes: m.notes, external_ref: m.external_ref ? `${hook}:${m.external_ref}` : null, campaign: m.campaign, ad_name: m.ad_name, utm_source: m.utm_source, utm_medium: m.utm_medium });
+  await record(res.duplicate ? "duplicate" : "created", res.id, null);
+  return c.json({ ...res, delivery: did }, res.duplicate ? 200 : 201);
+}
+r.post("/leads/crm", (c) => crmHook(c, "crm"));
+r.post("/leads/neodove", (c) => crmHook(c, "neodove"));
+/** The last deliveries, for tuning the mapping: owner only, through the API key gate plus the owner's own session is not available here, so this stays key-gated and returns no guest data beyond what the CRM sent. */
+r.get("/leads/crm/recent", async (c) => {
+  const propertyId = gate(c);
+  const rows = await all<any>(c.env.DB, "SELECT id, hook, received_at, outcome, lead_id, note, substr(payload_json, 1, 4000) AS payload_json FROM hook_deliveries WHERE property_id = ? ORDER BY received_at DESC LIMIT 20", propertyId);
+  return c.json({ deliveries: rows.map((r) => ({ ...r, payload: (() => { try { return JSON.parse(r.payload_json); } catch { return r.payload_json; } })(), payload_json: undefined })) });
 });
 
 /** Meta signs each webhook delivery with HMAC-SHA256 of the raw body using the app secret. */
