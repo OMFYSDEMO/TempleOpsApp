@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { get, post, patch, del } from "../api";
-import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, inr, fmtDate, fmtDateTime, useLoad, run, toast, thisPeriod , CategoryPicker } from "../ui";
+import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, BankPick, defaultBankId, inr, fmtDate, fmtDateTime, useLoad, run, toast, thisPeriod, todayIso, CategoryPicker } from "../ui";
 import { DriveSettings } from "./ids";
 import { catLabel, type Me, type Ref } from "../app";
 
-export function Approvals({ me }: { me: Me; refs: Ref }) {
+export function Approvals({ me, refs }: { me: Me; refs: Ref }) {
+  const [refundBank, setRefundBank] = useState(defaultBankId(refs.accounts));
   const q = useLoad(() => get("/approvals"), []);
   const refunds = useLoad(() => get("/approvals?status=approved"), []);
   const decide = (id: string, verb: string, body?: unknown) => run(async () => { await post(`/approvals/${id}/${verb}`, body); await Promise.all([q.reload(), refunds.reload()]); }, verb === "approve" ? "Approved · audited" : "Returned");
@@ -15,7 +16,7 @@ export function Approvals({ me }: { me: Me; refs: Ref }) {
     {q.data.approvals.length === 0 ? <Empty>Nothing waiting. On-tariff bookings, parsed OTA reservations and settlements pass straight through, audited.</Empty> : q.data.approvals.map((a: any) => <Card key={a.id} tone="amb" title={<>{a.kind} · {a.summary}</>} sub={<>requested by {a.requested_name ?? "system"} · {fmtDateTime(a.created_at)} · {a.note ? `reason: ${a.note.replace(/_/g, " ")}` : ""}</>}>
       {a.amount_paise != null && <Row strong label="Amount" value={inr(a.amount_paise)} />}
       <div className="actions end"><Btn kind="danger" onClick={() => { const note = prompt("Return with a note"); if (note) decide(a.id, "return", { note }); }}>Return</Btn><Btn kind="primary" onClick={() => decide(a.id, "approve", {})}>Approve</Btn></div></Card>)}
-    {me.actor.role === "owner" && toPay.length > 0 && <Card title="Refunds approved · make the bank transfer and record it">{toPay.map((a: any) => <div className="row" key={a.id}><div><div>{a.summary}</div><div className="sub">approved {fmtDateTime(a.decided_at)}</div></div><div className="actions"><b className="num">{inr(a.amount_paise)}</b><Btn small kind="primary" onClick={() => { const r = prompt("NEFT/UPI reference"); run(async () => { const res = await post(`/approvals/refunds/${a.id}/pay`, { reference: r }); if (res.invoice_to_credit) { await post(`/invoices/${res.invoice_to_credit.id}/credit-notes`, { reason: "refund on cancellation", total_paise: res.invoice_to_credit.suggested_total_paise, refund_payment_id: res.id }); toast("Refund recorded · credit note issued"); } else toast("Refund recorded"); await refunds.reload(); }); }}>Record transfer</Btn></div></div>)}</Card>}
+    {me.actor.role === "owner" && toPay.length > 0 && <Card title="Refunds approved · make the bank transfer and record it"><BankPick accounts={refs.accounts} value={refundBank} onChange={setRefundBank} label="Refund paid from" />{toPay.map((a: any) => <div className="row" key={a.id}><div><div>{a.summary}</div><div className="sub">approved {fmtDateTime(a.decided_at)}</div></div><div className="actions"><b className="num">{inr(a.amount_paise)}</b><Btn small kind="primary" onClick={() => { const r = prompt("NEFT/UPI reference"); run(async () => { const res = await post(`/approvals/refunds/${a.id}/pay`, { reference: r, account_id: refundBank || undefined }); if (res.invoice_to_credit) { await post(`/invoices/${res.invoice_to_credit.id}/credit-notes`, { reason: "refund on cancellation", total_paise: res.invoice_to_credit.suggested_total_paise, refund_payment_id: res.id }); toast("Refund recorded · credit note issued"); } else toast("Refund recorded"); await refunds.reload(); }); }}>Record transfer</Btn></div></div>)}</Card>}
     <Card title="Recent decisions · audit trail">{q.data.recent.length === 0 ? <Empty>None yet.</Empty> : q.data.recent.map((a: any) => <div className="row" key={a.id}><div><div>{a.summary}</div><div className="sub">{a.decided_name} · {fmtDateTime(a.decided_at)}{a.note ? ` · ${a.note}` : ""}</div></div><Status s={a.status} /></div>)}</Card>
   </>;
 }
@@ -27,10 +28,11 @@ export function Payouts({ refs }: { me: Me; refs: Ref }) {
   const list = useLoad(() => get("/settlements"), []);
   const [sel, setSel] = useState<string[]>([]); const [preview, setPreview] = useState<any>(null); const [refn, setRefn] = useState(""); const [recv, setRecv] = useState(""); const [on, setOn] = useState("");
   const [open, setOpen] = useState<string | null>(null);
+  const [bankId, setBankId] = useState(defaultBankId(refs.accounts));
   const detail = useLoad(() => open ? get(`/settlements/${open}`) : Promise.resolve(null), [open]);
   const doPreview = () => run(async () => setPreview((await post("/settlements", { channel_code: channel, booking_ids: sel, preview: true })).preview));
   const create = () => run(async () => { const s = await post("/settlements", { channel_code: channel, booking_ids: sel, payout_ref: refn, payout_on: on || null, received_paise: recv ? Math.round(Number(recv) * 100) : undefined }); setSel([]); setPreview(null); setRefn(""); await Promise.all([un.reload(), list.reload()]); setOpen(s.id); }, "Settlement drafted · nothing posted yet");
-  const settle = (id: string) => run(async () => { await post(`/settlements/${id}/settle`, {}); await Promise.all([list.reload(), un.reload(), detail.reload()]); }, "Settled · commission & fee posted once, stays settled");
+  const settle = (id: string) => run(async () => { await post(`/settlements/${id}/settle`, { account_id: bankId || undefined }); await Promise.all([list.reload(), un.reload(), detail.reload()]); }, "Settled · commission & fee posted once, stays settled");
   const undo = (id: string) => { const reason = prompt("Undo reason"); if (reason) run(async () => { await post(`/settlements/${id}/undo`, { reason }); await Promise.all([list.reload(), un.reload(), detail.reload()]); }, "Undone · every expense the settlement created removed"); };
   const ch = refs.channels.find((c) => c.code === channel);
   return <>
@@ -47,6 +49,7 @@ export function Payouts({ refs }: { me: Me; refs: Ref }) {
         <div className="grid two"><Field label="Payout reference"><input value={refn} onChange={(e: any) => setRefn(e.currentTarget.value)} placeholder="010649992418" /></Field><Field label="Payout date"><input type="date" value={on} onChange={(e: any) => setOn(e.currentTarget.value)} /></Field><Field label="Received (₹) — blank = expected"><input inputMode="decimal" value={recv} onChange={(e: any) => setRecv(e.currentTarget.value)} /></Field></div>
         <div className="actions end"><Btn kind="primary" disabled={!refn} onClick={create}>Draft settlement</Btn></div></>}</Card>
     </div>
+    <BankPick accounts={refs.accounts} value={bankId} onChange={setBankId} label="Payouts land in" />
     <Card title="Settlements">{!list.data ? <Loading /> : list.data.settlements.length === 0 ? <Empty>None yet.</Empty> : <table className="t"><thead><tr><th>Payout</th><th>Channel</th><th className="num">Stays</th><th className="num">Expected</th><th className="num">Received</th><th className="num">Variance</th><th>Status</th><th></th></tr></thead><tbody>{list.data.settlements.map((s: any) => <tr key={s.id}><td className="mono">{s.payout_ref}</td><td>{s.channel_name}</td><td className="num">{s.stays}</td><td className="num">{inr(s.expected_paise)}</td><td className="num">{inr(s.received_paise)}</td><td className="num">{inr(s.variance_paise)}</td><td><Status s={s.status} /></td><td className="actions"><Btn small onClick={() => setOpen(open === s.id ? null : s.id)}>{open === s.id ? "Close" : "Open"}</Btn>{s.status === "draft" && <Btn small kind="primary" onClick={() => settle(s.id)}>Mark settled</Btn>}{s.status === "settled" && <Btn small kind="danger" onClick={() => undo(s.id)}>Undo</Btn>}</td></tr>)}</tbody></table>}</Card>
     {open && detail.data && <Card title={`Payout ${detail.data.settlement.payout_ref}`} sub={<>{detail.data.settlement.channel_name} · <Status s={detail.data.settlement.status} /></>}>
       <table className="t"><thead><tr><th>Stay</th><th className="num">Gross</th><th className="num">Commission</th><th className="num">Fee</th><th className="num">TCS</th><th className="num">TDS</th><th className="num">Net</th></tr></thead><tbody>{detail.data.items.map((i: any) => <tr key={i.booking_id}><td>{i.guest_name} · {fmtDate(i.check_out)}</td><td className="num">{inr(i.gross_paise)}</td><td className="num">{inr(i.commission_paise)}</td><td className="num">{inr(i.payment_fee_paise)}</td><td className="num">{inr(i.tcs_paise)}</td><td className="num">{inr(i.tds_paise)}</td><td className="num">{inr(i.net_paise)}</td></tr>)}</tbody></table>
@@ -56,7 +59,8 @@ export function Payouts({ refs }: { me: Me; refs: Ref }) {
 }
 
 export function Reconcile({ me, refs }: { me: Me; refs: Ref }) {
-  const bank = refs.accounts.find((a) => a.kind === "bank");
+  const [bankId, setBankId] = useState(defaultBankId(refs.accounts));
+  const bank = refs.accounts.find((a) => a.id === bankId) ?? refs.accounts.find((a) => a.kind === "bank");
   const [period, setPeriod] = useState(thisPeriod());
   const q = useLoad(() => get(`/recon?period=${period}`), [period]);
   const [text, setText] = useState("");
@@ -67,6 +71,7 @@ export function Reconcile({ me, refs }: { me: Me; refs: Ref }) {
     <h2>Smart Reconcile <small>W7 · four tiers; nothing writes until accepted · target &gt; 80% auto</small></h2>
     {me.actor.role === "revenue" && <div className="muted">You see bank credits. Debits (bank-paid expenses, refunds) are reconciled by the owner or the CA.</div>}
     <Card title={`Paste bank statement · ${bank?.name ?? "bank"}`} sub="date, description, debit, credit — tab, comma or pipe separated; lines already seen are skipped">
+      <BankPick accounts={refs.accounts} value={bankId} onChange={setBankId} label="Statement of" />
       <Field label=""><textarea rows={5} value={text} onChange={(e: any) => setText(e.currentTarget.value)} placeholder={"14/10/2026\tNEFT BOOKING.COM 010649992418\t\t30836.26"} /></Field><div className="actions end"><Btn onClick={() => setText("")}>Clear</Btn><Btn kind="primary" disabled={!text.trim()} onClick={paste}>Match</Btn></div></Card>
     <div className="actions" style={{ marginBottom: "10px" }}><Field label="Month"><input type="month" value={period} onChange={(e: any) => setPeriod(e.currentTarget.value)} /></Field>{q.data && <div className="kpi" style={{ flex: 1 }}><div className="k"><small>Lines</small><b>{q.data.stats.total}</b></div><div className="k"><small>Matched</small><b>{q.data.stats.matched}</b></div><div className="k"><small>Proposed</small><b>{q.data.stats.proposed}</b></div><div className="k"><small>Auto rate</small><b>{q.data.stats.auto_rate}%</b></div></div>}</div>
     {!q.data ? <Loading error={q.error} /> : q.data.lines.length === 0 ? <Empty>No statement lines in {period}.</Empty> : <>
@@ -117,13 +122,18 @@ export function OwnerDashboard({ refs }: { me: Me; refs: Ref }) {
 export function BankExpenses({ refs }: { me: Me; refs: Ref }) {
   const [period, setPeriod] = useState(thisPeriod());
   const q = useLoad(() => get(`/expenses?scope=bank&period=${period}`), [period]);
-  const bank = refs.accounts.find((a) => a.kind === "bank"); const petty = refs.accounts.find((a) => a.kind === "petty_cash");
+  const [bankId, setBankId] = useState(defaultBankId(refs.accounts));
+  const bank = refs.accounts.find((a) => a.id === bankId) ?? refs.accounts.find((a) => a.kind === "bank"); const petty = refs.accounts.find((a) => a.kind === "petty_cash");
+  const banks = refs.accounts.filter((a) => a.kind === "bank");
   const [f, setF] = useState<any>({ category: "utilities", description: "", vendor_name: "", vendor_gstin: "", amount: "", reference: "", gst_rate_bp: 0 });
   const [top, setTop] = useState("");
+  const [mv, setMv] = useState<any>({ from_account_id: banks.find((b) => !b.is_default)?.id ?? banks[0]?.id ?? "", to_account_id: defaultBankId(refs.accounts), amount: "", on_date: todayIso(), reference: "", note: "" });
+  const balances = useLoad(() => get("/payments/accounts"), []);
   return <>
     <h2>Bank expenses <small>the owner's one entry duty · each carries its NEFT reference and auto-matches at reconciliation</small></h2>
     <div className="grid two">
       <Card title="New expense · paid by bank transfer" sub="pick a category, type the amount and the bank reference; it matches itself at reconciliation">
+        <BankPick accounts={refs.accounts} value={bankId} onChange={setBankId} label="Paid from" />
         <CategoryPicker label="Category" value={f.category} onChange={(v) => setF({ ...f, category: v })} categories={refs.expense_categories.filter((c) => c.bank)} common={refs.common_categories.bank} families={refs.expense_families} />
         <div className="form-grid">
           <Field label="Description"><input value={f.description} onChange={(e: any) => setF({ ...f, description: e.currentTarget.value })} placeholder="KSEB electricity · Sep" /></Field>
@@ -134,8 +144,20 @@ export function BankExpenses({ refs }: { me: Me; refs: Ref }) {
           <Field label="Bank reference (NEFT/UPI)"><input value={f.reference} onChange={(e: any) => setF({ ...f, reference: e.currentTarget.value })} /></Field>
         </div>
         <div className="actions end"><Btn kind="primary" disabled={!f.amount} onClick={() => run(async () => { await post("/expenses", { ...f, amount_paise: Math.round(Number(f.amount) * 100), account_id: bank?.id }); setF({ ...f, description: "", amount: "", reference: "" }); await q.reload(); }, "Recorded")}>Record expense</Btn></div></Card>
-      <Card title="Petty-cash top-up" sub="a transfer from the bank to the property manager — not an expense"><Field label="Amount (₹)"><input inputMode="decimal" value={top} onChange={(e: any) => setTop(e.currentTarget.value)} /></Field><div className="actions end"><Btn kind="primary" disabled={!top} onClick={() => run(async () => { await post("/payments/transfers", { from_account_id: bank?.id, to_account_id: petty?.id, amount_paise: Math.round(Number(top) * 100) }); setTop(""); }, "Top-up recorded as a transfer")}>Top up petty cash</Btn></div></Card>
+      <Card title="Petty-cash top-up" sub={`a transfer from ${bank?.name ?? "the bank"} to the property manager — not an expense`}><Field label="Amount (₹)"><input inputMode="decimal" value={top} onChange={(e: any) => setTop(e.currentTarget.value)} /></Field><div className="actions end"><Btn kind="primary" disabled={!top} onClick={() => run(async () => { await post("/payments/transfers", { from_account_id: bank?.id, to_account_id: petty?.id, amount_paise: Math.round(Number(top) * 100) }); setTop(""); }, "Top-up recorded as a transfer")}>Top up petty cash</Btn></div></Card>
     </div>
+    {banks.length > 1 && <Card title="Move money between accounts" sub="Yes Bank → IDFC, or a bank → cash: a transfer, not income or expense; each side matches its own statement line at reconciliation"
+      actions={balances.data && <span className="sub">{balances.data.accounts.filter((a: any) => a.kind === "bank").map((a: any) => `${a.name} ${inr(a.balance_paise)}`).join(" · ")}</span>}>
+      <div className="form-grid four">
+        <Field label="From"><select value={mv.from_account_id} onChange={(e: any) => setMv({ ...mv, from_account_id: e.currentTarget.value })}>{refs.accounts.filter((a) => a.kind !== "gateway").map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+        <Field label="To"><select value={mv.to_account_id} onChange={(e: any) => setMv({ ...mv, to_account_id: e.currentTarget.value })}>{refs.accounts.filter((a) => a.kind !== "gateway").map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+        <Field label="Amount (₹)"><input inputMode="decimal" value={mv.amount} onChange={(e: any) => setMv({ ...mv, amount: e.currentTarget.value })} /></Field>
+        <Field label="Date"><input type="date" value={mv.on_date} onChange={(e: any) => setMv({ ...mv, on_date: e.currentTarget.value })} /></Field>
+        <Field label="Bank reference (NEFT/IMPS/UTR)"><input value={mv.reference} onChange={(e: any) => setMv({ ...mv, reference: e.currentTarget.value })} /></Field>
+        <Field label="Note"><input value={mv.note} onChange={(e: any) => setMv({ ...mv, note: e.currentTarget.value })} placeholder="moving the float to IDFC" /></Field>
+      </div>
+      <div className="actions end"><Btn kind="primary" disabled={!mv.amount || mv.from_account_id === mv.to_account_id} onClick={() => run(async () => { await post("/payments/transfers", { ...mv, amount_paise: Math.round(Number(mv.amount) * 100) }); setMv({ ...mv, amount: "", reference: "", note: "" }); await balances.reload(); }, "Transfer recorded")}>Record transfer</Btn></div>
+    </Card>}
     <Field label="Month"><input type="month" value={period} onChange={(e: any) => setPeriod(e.currentTarget.value)} /></Field>
     <Card title="This month · bank-paid">{!q.data ? <Loading error={q.error} /> : q.data.expenses.length === 0 ? <Empty>None in {period}.</Empty> : q.data.expenses.map((e: any) => <div className="row" key={e.id}><div><div>{e.description ?? catLabel(refs, e.category)} <span className="muted">· {catLabel(refs, e.category)}</span> {e.kind !== "normal" && <Status s={e.kind} />}{e.voided_at && <Status s="void" />}</div><div className="sub">{fmtDate(e.on_date)} · {e.vendor_name ?? "—"}{e.vendor_gstin ? " · GSTIN ✓" : ""}{e.reference ? ` · ${e.reference}` : ""}</div></div><div className="actions"><b className="num">{inr(e.amount_paise)}</b>{!e.voided_at && e.kind === "normal" && <Btn small kind="danger" onClick={() => { const reason = prompt("Void reason"); if (reason) run(async () => { await post(`/expenses/${e.id}/void`, { reason }); await q.reload(); }, "Voided"); }}>Void</Btn>}</div></div>)}</Card>
   </>;
@@ -167,9 +189,47 @@ export function Admin({ refs }: { me: Me; refs: Ref }) {
       <Card title="Tariff card" sub="per room; a dated card with higher priority overrides the standard rate">{refs.locations.filter((l) => l.kind === "room").map((r) => <div key={r.id}><b>{r.name}</b>{refs.rate_cards.filter((c) => c.room_id === r.id).map((c) => <div className="row" key={c.id}><div>{c.name}{c.from_date ? ` · ${fmtDate(c.from_date)} → ${fmtDate(c.to_date)}` : " · always"} · p{c.priority}</div><div className="actions"><b className="num">{inr(c.rate_paise)}</b><Btn small kind="danger" onClick={() => run(async () => { await del(`/admin/rate-cards/${c.id}`); location.reload(); }, "Removed")}>×</Btn></div></div>)}</div>)}
         <details><summary>Add card</summary><Field label="Room"><select value={rc.room_id} onChange={(e: any) => setRc({ ...rc, room_id: e.currentTarget.value })}>{refs.locations.filter((l) => l.kind === "room").map((r) => <option value={r.id}>{r.name}</option>)}</select></Field><div className="grid two"><Field label="Name"><input value={rc.name} onChange={(e: any) => setRc({ ...rc, name: e.currentTarget.value })} /></Field><Field label="Rate ex-GST (₹)"><input inputMode="decimal" value={rc.rate} onChange={(e: any) => setRc({ ...rc, rate: e.currentTarget.value })} /></Field><Field label="From"><input type="date" value={rc.from_date} onChange={(e: any) => setRc({ ...rc, from_date: e.currentTarget.value })} /></Field><Field label="To"><input type="date" value={rc.to_date} onChange={(e: any) => setRc({ ...rc, to_date: e.currentTarget.value })} /></Field></div><div className="actions end"><Btn kind="primary" onClick={() => run(async () => { await post("/admin/rate-cards", { room_id: rc.room_id, name: rc.name, rate_paise: Math.round(Number(rc.rate) * 100), from_date: rc.from_date || null, to_date: rc.to_date || null, priority: rc.priority }); location.reload(); }, "Card added")}>Add</Btn></div></details></Card>
     </div>
+  <AccountsSettings />
   <DriveSettings />
   </>;
 }
+/** Banks and cash accounts: names, opening balances, which bank is the default, and closing a bank once it is empty. */
+function AccountsSettings() {
+  const q = useLoad(() => get("/admin/accounts"), []);
+  const bal = useLoad(() => get("/payments/accounts"), []);
+  const [edit, setEdit] = useState<any>(null);
+  const [na, setNa] = useState<any>({ name: "", account_no: "", opening: "", opening_date: todayIso(), is_default: false });
+  const balanceOf = (id: string) => bal.data?.accounts.find((a: any) => a.id === id)?.balance_paise;
+  const save = (a: any) => run(async () => { await patch(`/admin/accounts/${a.id}`, { name: a.name, account_no: a.account_no || null, opening_paise: Math.round(Number(a.opening) * 100), opening_date: a.opening_date || null, note: a.note || null }); setEdit(null); await Promise.all([q.reload(), bal.reload()]); }, "Account saved · reload to see it in the pickers");
+  return <Card title="Bank & cash accounts" sub="each bank is its own ledger with its own statement; the default bank is where payouts, gateway settlements and bank receipts land unless someone picks another">
+    {!q.data ? <Loading error={q.error} /> : q.data.accounts.map((a: any) => <div className="row" key={a.id}><div>
+      <div><b>{a.name}</b> <span className="muted">· {a.kind.replace("_", " ")}{a.account_no ? ` · ${a.account_no}` : ""}</span> {a.is_default ? <Status s="default" /> : null}{!a.active && <Status s="inactive" />}</div>
+      <div className="sub">opening {inr(a.opening_paise)} on {a.opening_date ?? "—"}{balanceOf(a.id) !== undefined ? ` · balance today ${inr(balanceOf(a.id))}` : ""}{a.note ? ` · ${a.note}` : ""}</div>
+      {edit?.id === a.id && <div className="form-grid four" style={{ marginTop: "8px" }}>
+        <Field label="Name"><input value={edit.name} onChange={(e: any) => setEdit({ ...edit, name: e.currentTarget.value })} /></Field>
+        <Field label="Account no. (last digits)"><input value={edit.account_no ?? ""} onChange={(e: any) => setEdit({ ...edit, account_no: e.currentTarget.value })} /></Field>
+        <Field label="Opening balance (₹)"><input inputMode="decimal" value={edit.opening} onChange={(e: any) => setEdit({ ...edit, opening: e.currentTarget.value })} /></Field>
+        <Field label="Opening date"><input type="date" value={edit.opening_date ?? ""} onChange={(e: any) => setEdit({ ...edit, opening_date: e.currentTarget.value })} /></Field>
+        <Field label="Note"><input value={edit.note ?? ""} onChange={(e: any) => setEdit({ ...edit, note: e.currentTarget.value })} /></Field>
+        <div className="actions end" style={{ gridColumn: "1 / -1" }}><Btn onClick={() => setEdit(null)}>Discard</Btn><Btn kind="primary" onClick={() => save(edit)}>Save</Btn></div>
+      </div>}
+    </div><div className="actions">
+      {a.active && edit?.id !== a.id && <Btn small onClick={() => setEdit({ ...a, opening: String(a.opening_paise / 100) })}>Edit</Btn>}
+      {a.kind === "bank" && a.active && !a.is_default && <Btn small onClick={() => run(async () => { await patch(`/admin/accounts/${a.id}`, { is_default: true }); await q.reload(); }, `${a.name} is now the default bank · reload to update the pickers`)}>Make default</Btn>}
+      {a.kind === "bank" && a.active && !a.is_default && <Btn small kind="danger" onClick={() => { if (confirm(`Close ${a.name}? It stays in history; nothing new can be recorded against it.`)) run(async () => { await patch(`/admin/accounts/${a.id}`, { active: false }); await q.reload(); }, "Closed"); }}>Close</Btn>}
+      {!a.active && <Btn small onClick={() => run(async () => { await patch(`/admin/accounts/${a.id}`, { active: true }); await q.reload(); }, "Reopened")}>Reopen</Btn>}
+    </div></div>)}
+    <details><summary>Add a bank account</summary><div className="form-grid four" style={{ marginTop: "8px" }}>
+      <Field label="Name"><input value={na.name} onChange={(e: any) => setNa({ ...na, name: e.currentTarget.value })} placeholder="IDFC First" /></Field>
+      <Field label="Account no. (last digits)"><input value={na.account_no} onChange={(e: any) => setNa({ ...na, account_no: e.currentTarget.value })} /></Field>
+      <Field label="Opening balance (₹)"><input inputMode="decimal" value={na.opening} onChange={(e: any) => setNa({ ...na, opening: e.currentTarget.value })} /></Field>
+      <Field label="Opening date"><input type="date" value={na.opening_date} onChange={(e: any) => setNa({ ...na, opening_date: e.currentTarget.value })} /></Field>
+      <Field label="Default bank"><select value={na.is_default ? "1" : "0"} onChange={(e: any) => setNa({ ...na, is_default: e.currentTarget.value === "1" })}><option value="0">no</option><option value="1">yes — payouts and receipts land here</option></select></Field>
+      <div className="actions end" style={{ gridColumn: "1 / -1" }}><Btn kind="primary" disabled={!na.name.trim()} onClick={() => run(async () => { await post("/admin/accounts", { ...na, opening_paise: Math.round(Number(na.opening || 0) * 100) }); setNa({ name: "", account_no: "", opening: "", opening_date: todayIso(), is_default: false }); await q.reload(); }, "Bank added · reload to see it in the pickers")}>Add bank</Btn></div>
+    </div></details>
+  </Card>;
+}
+
 function ChannelEdit({ c }: { c: any }) {
   const [f, setF] = useState({ commission_bp: c.commission_bp, payment_fee_bp: c.payment_fee_bp, tcs_bp: c.tcs_bp, tds_bp: c.tds_bp });
   return <div className="grid two">{(["commission_bp", "payment_fee_bp", "tcs_bp", "tds_bp"] as const).map((k) => <Field key={k} label={`${k.replace("_bp", "").replace("_", " ")} (bp: 2300 = 23%)`}><input type="number" value={(f as any)[k]} onChange={(e: any) => setF({ ...f, [k]: Number(e.currentTarget.value) })} /></Field>)}<div className="actions end"><Btn small kind="primary" onClick={() => run(async () => { await patch(`/admin/channels/${c.id}`, f); }, "Terms updated · audited")}>Save</Btn></div></div>;

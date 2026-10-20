@@ -31,9 +31,17 @@ export function Chip(p: { on?: boolean; onClick?: () => void; children?: Compone
 export function Chips<T extends string>(p: { value: T | null; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   return <div className="chips">{p.options.map((o) => <Chip key={o.value} on={p.value === o.value} onClick={() => p.onChange(o.value)}>{o.label}</Chip>)}</div>;
 }
+/** Which bank: hidden when there is only one; the default bank is preselected. */
+export function BankPick({ accounts, value, onChange, label = "Bank" }: { accounts: any[]; value: string; onChange: (id: string) => void; label?: ComponentChildren }) {
+  const banks = accounts.filter((a) => a.kind === "bank");
+  if (banks.length < 2) return null;
+  return <label className="field"><span>{label}</span><select value={value} onChange={(e: any) => onChange(e.currentTarget.value)}>{banks.map((b) => <option key={b.id} value={b.id}>{b.name}{b.account_no ? ` · ${b.account_no}` : ""}{b.is_default ? " (default)" : ""}</option>)}</select></label>;
+}
+export const defaultBankId = (accounts: any[]) => { const banks = accounts.filter((a) => a.kind === "bank"); return (banks.find((b) => b.is_default) ?? banks[0])?.id ?? ""; };
+
 export function Field(p: { label: ComponentChildren; children?: ComponentChildren; hint?: ComponentChildren }) { return <label className="field"><span>{p.label}</span>{p.children}{p.hint && <small>{p.hint}</small>}</label>; }
 export function Status(p: { s: string }) {
-  const tone: Record<string, string> = { new: "amb", contacted: "", quoted: "", hold: "amb", won: "ok", lost: "bad", provisional: "amb", approved: "ok", checked_in: "ok", checked_out: "", cancelled: "bad", no_show: "bad", pending: "amb", returned: "bad", auto: "ok", open: "amb", in_progress: "", done: "ok", noted: "muted", matched: "ok", proposed: "amb", unmatched: "bad", carried: "muted", locked: "ok", filed: "ok", precleared: "amb", settled: "ok", draft: "amb", undone: "bad", duplicate: "muted", routed: "muted", dismissed: "muted", void: "bad", issued: "ok", credited: "muted", overdue: "bad", waiting: "amb", inactive: "muted", below: "amb", above: "", due: "amb", none: "muted" };
+  const tone: Record<string, string> = { new: "amb", contacted: "", quoted: "", hold: "amb", won: "ok", lost: "bad", provisional: "amb", approved: "ok", checked_in: "ok", checked_out: "", cancelled: "bad", no_show: "bad", pending: "amb", returned: "bad", auto: "ok", open: "amb", in_progress: "", done: "ok", noted: "muted", matched: "ok", proposed: "amb", unmatched: "bad", carried: "muted", locked: "ok", filed: "ok", precleared: "amb", settled: "ok", draft: "amb", undone: "bad", duplicate: "muted", routed: "muted", dismissed: "muted", void: "bad", issued: "ok", credited: "muted", overdue: "bad", waiting: "amb", inactive: "muted", below: "amb", above: "", due: "amb", none: "muted", default: "ok" };
   return <span className={`status ${tone[p.s] ?? ""}`}>{p.s.replace(/_/g, " ")}</span>;
 }
 export function Empty(p: { children?: ComponentChildren }) { return <div className="empty">{p.children ?? "Nothing here."}</div>; }

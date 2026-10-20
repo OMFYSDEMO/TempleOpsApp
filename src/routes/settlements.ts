@@ -1,5 +1,5 @@
 import { newRouter, requireCap, body, str, optStr, oneOf, paise } from "../app";
-import { Batch, HttpError, all, one, id, assertPeriodOpen } from "../db";
+import { Batch, HttpError, all, one, id, assertPeriodOpen, defaultBank, bankAccount } from "../db";
 import { nowIso, todayIn } from "../domain/dates";
 import { computeSettlement } from "../domain/settlement";
 import type { ChannelRow } from "../services/bookings";
@@ -80,8 +80,7 @@ r.post("/:id/settle", async (c) => {
   await assertPeriodOpen(c.env.DB, p.id, onDate);
   const received = x.received_paise !== undefined ? paise(x.received_paise, "received_paise", { allowZero: true }) : s.received_paise ?? s.expected_paise;
   const variance = received - s.expected_paise;
-  const bank = await one<{ id: string }>(c.env.DB, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = 'bank' AND active = 1 LIMIT 1", p.id);
-  if (!bank) throw new HttpError(400, "no bank account");
+  const bank = x.account_id ? await bankAccount(c.env.DB, p.id, str(x.account_id, "account_id")) : await defaultBank(c.env.DB, p.id);
   const items = await all<any>(c.env.DB, "SELECT si.*, b.guest_id FROM settlement_items si JOIN bookings b ON b.id = si.booking_id WHERE si.settlement_id = ?", s.id);
   const now = nowIso();
   const b = new Batch(c.env.DB, actor);

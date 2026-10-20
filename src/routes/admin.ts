@@ -25,7 +25,7 @@ r.get("/ref", async (c) => {
   const [locations, channels, accounts, users, rateCards] = await Promise.all([
     all(c.env.DB, "SELECT id, kind, code, name, sort FROM locations WHERE property_id = ? AND active = 1 ORDER BY kind DESC, sort", p.id),
     all(c.env.DB, "SELECT id, code, name, collection_type, commission_bp, payment_fee_bp, tcs_bp, tds_bp FROM channels WHERE property_id = ? AND active = 1", p.id),
-    all(c.env.DB, "SELECT id, kind, name, holder_role FROM money_accounts WHERE property_id = ? AND active = 1", p.id),
+    all(c.env.DB, "SELECT id, kind, name, holder_role, is_default, account_no FROM money_accounts WHERE property_id = ? AND active = 1 ORDER BY kind, is_default DESC, name", p.id),
     all(c.env.DB, "SELECT id, name, role FROM users WHERE property_id = ? AND active = 1", p.id),
     all(c.env.DB, "SELECT id, room_id, name, rate_paise, from_date, to_date, priority FROM rate_cards WHERE property_id = ? ORDER BY room_id, priority", p.id),
   ]);
@@ -145,6 +145,46 @@ admin.patch("/property", async (c) => {
   await b.run();
   return c.json({ ok: true });
 });
+// ---- Money accounts: banks come and go; the default bank is where money lands unless someone picks another ----
+admin.get("/accounts", async (c) => c.json({ accounts: await all(c.env.DB, "SELECT * FROM money_accounts WHERE property_id = ? ORDER BY active DESC, kind, is_default DESC, name", c.get("property").id) }));
+admin.post("/accounts", async (c) => {
+  const p = c.get("property"); const x = await body(c);
+  const aid = id("acc");
+  const name = str(x.name, "name", { max: 60 });
+  const opening = x.opening_paise !== undefined ? int(x.opening_paise, "opening_paise", { min: -1_000_000_000_00 }) : 0;
+  const openingDate = optDate(x.opening_date, "opening_date") ?? todayIn(p.timezone);
+  const makeDefault = !!x.is_default;
+  const b = new Batch(c.env.DB, c.get("actor"));
+  if (makeDefault) b.add("UPDATE money_accounts SET is_default = 0 WHERE property_id = ? AND kind = 'bank'", p.id);
+  b.add("INSERT INTO money_accounts (id, property_id, kind, name, holder_role, opening_paise, opening_date, active, is_default, account_no, note) VALUES (?,?,'bank',?,'owner',?,?,1,?,?,?)",
+    aid, p.id, name, opening, openingDate, makeDefault ? 1 : 0, optStr(x.account_no, "account_no"), optStr(x.note, "note"));
+  b.audit("account.create", "money_account", aid, null, { name, opening_paise: opening, opening_date: openingDate, is_default: makeDefault });
+  await b.run();
+  return c.json({ id: aid }, 201);
+});
+admin.patch("/accounts/:id", async (c) => {
+  const p = c.get("property"); const x = await body(c);
+  const a: any = await one(c.env.DB, "SELECT * FROM money_accounts WHERE id = ? AND property_id = ?", c.req.param("id"), p.id);
+  if (!a) throw new HttpError(404, "account not found");
+  const after: Record<string, unknown> = {};
+  if (x.name !== undefined) after.name = str(x.name, "name", { max: 60 });
+  if (x.opening_paise !== undefined) after.opening_paise = int(x.opening_paise, "opening_paise", { min: -1_000_000_000_00 });
+  if (x.opening_date !== undefined) after.opening_date = optDate(x.opening_date, "opening_date");
+  if (x.account_no !== undefined) after.account_no = optStr(x.account_no, "account_no");
+  if (x.note !== undefined) after.note = optStr(x.note, "note");
+  if (x.active !== undefined) {
+    after.active = x.active ? 1 : 0;
+    if (!x.active && a.kind === "bank" && a.is_default) throw new HttpError(409, "make another bank the default before closing this one");
+  }
+  const b = new Batch(c.env.DB, c.get("actor"));
+  if (x.is_default && a.kind === "bank") { b.add("UPDATE money_accounts SET is_default = 0 WHERE property_id = ? AND kind = 'bank'", p.id); after.is_default = 1; }
+  if (!Object.keys(after).length) throw new HttpError(400, "nothing to update");
+  b.add(`UPDATE money_accounts SET ${Object.keys(after).map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, ...Object.values(after), a.id);
+  b.audit("account.update", "money_account", a.id, Object.fromEntries(Object.keys(after).map((k) => [k, a[k]])), after);
+  await b.run();
+  return c.json({ ok: true });
+});
+
 admin.post("/rate-cards", async (c) => {
   const p = c.get("property"); const x = await body(c);
   const room = await one(c.env.DB, "SELECT id FROM locations WHERE id = ? AND property_id = ? AND kind = 'room'", str(x.room_id, "room_id"), p.id);

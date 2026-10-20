@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { get, post, patch, uploadFile } from "../api";
 import { submit, readQueue, onQueueChange, dropQueued, flush } from "../offline";
-import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, Keypad, inr, fmtDate, useLoad, run, toast, todayIso, thisPeriod , CategoryPicker } from "../ui";
+import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, Keypad, inr, fmtDate, useLoad, run, toast, todayIso, thisPeriod, CategoryPicker, BankPick, defaultBankId } from "../ui";
 import { catLabel, type Me, type Ref } from "../app";
 import { idsHref } from "./ids";
 
@@ -30,9 +30,10 @@ export function Payments({ me, refs }: { me: Me; refs: Ref }) {
   const recent = useLoad(() => get("/payments"), []);
   const accounts = useLoad(() => get("/payments/accounts"), []);
   const [sel, setSel] = useState<any>(null); const [amt, setAmt] = useState(0); const [method, setMethod] = useState<string>("upi"); const [refn, setRefn] = useState("");
+  const [bankId, setBankId] = useState(defaultBankId(refs.accounts));
   useEffect(() => { const pre = sessionStorage.getItem("avos.collect"); if (pre && due.data) { const d = due.data.due.find((x: any) => x.booking_id === pre); if (d) { setSel(d); setAmt(d.balance_paise); } sessionStorage.removeItem("avos.collect"); } }, [due.data]);
   const record = () => run(async () => {
-    const r = await submit("POST", "/payments", { booking_id: sel?.booking_id ?? null, method, amount_paise: amt, reference: refn || null }, `Collect ${inr(amt)} · ${sel?.guest_name ?? "walk-in"}`);
+    const r = await submit("POST", "/payments", { booking_id: sel?.booking_id ?? null, method, amount_paise: amt, reference: refn || null, account_id: ["upi", "bank"].includes(method) ? bankId || undefined : undefined }, `Collect ${inr(amt)} · ${sel?.guest_name ?? "walk-in"}`);
     if (r.queued) toast("Saved offline · will sync"); else toast(`Posted · ${r.result.fee_expense_id ? "fee booked once" : "no fee"} · balance ${inr(r.result.balance_paise)}`);
     setSel(null); setAmt(0); setRefn(""); await Promise.all([due.reload(), recent.reload(), accounts.reload()]);
   });
@@ -45,6 +46,7 @@ export function Payments({ me, refs }: { me: Me; refs: Ref }) {
       <Card title={sel ? `${sel.guest_name} · ${inr(sel.balance_paise)}` : "Record a payment"} sub={sel ? "exact balance = one tap; tap the figure for a different amount" : "pick a guest on the left, or record a walk-in collection"}>
         <Keypad value={amt} onChange={setAmt} />
         <Chips value={method} options={METHODS.map(([v, l]) => ({ value: v, label: l }))} onChange={setMethod} />
+        {["upi", "bank"].includes(method) && <BankPick accounts={refs.accounts} value={bankId} onChange={setBankId} label="Received into" />}
         <Field label="Reference (optional — UPI apps show it)"><input value={refn} onChange={(e: any) => setRefn(e.currentTarget.value)} /></Field>
         <div className="actions end">{sel && <Btn onClick={() => { setSel(null); setAmt(0); }}>Clear</Btn>}<Btn kind="gold" disabled={amt <= 0} onClick={record}>Collected {inr(amt)}</Btn></div></Card>
     </div>

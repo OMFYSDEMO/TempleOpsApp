@@ -43,7 +43,10 @@ r.post("/paste", async (c) => {
   const accountId = str(x.account_id, "account_id");
   const acct = await one<{ id: string; kind: string }>(c.env.DB, "SELECT id, kind FROM money_accounts WHERE id = ? AND property_id = ?", accountId, p.id);
   if (!acct) throw new HttpError(400, "unknown account");
-  const text = str(x.text, "text", { max: 200_000 });
+  // Not trimmed: a trailing tab on the last line is the empty credit column that marks a debit.
+  if (typeof x.text !== "string" || !x.text.trim()) throw new HttpError(400, "text is required");
+  if (x.text.length > 200_000) throw new HttpError(400, "text too long");
+  const text: string = x.text;
   const { lines, rejected } = parseStatement(text, Number(todayIn(p.timezone).slice(0, 4)));
   if (!lines.length) throw new HttpError(400, "no statement lines recognised", { rejected });
   const runId = id("run");

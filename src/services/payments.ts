@@ -50,8 +50,8 @@ export async function recordPayment(db: D1Database, actor: Actor, p: PropertyRow
     if (!a) throw new HttpError(400, "unknown money account");
   } else {
     const kindWanted = x.method === "cash" ? "cash" : x.method === "airpay" || x.method === "card" ? "gateway" : "bank";
-    const a = await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = ? AND active = 1 ORDER BY id LIMIT 1", p.id, kindWanted)
-      ?? await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = 'bank' AND active = 1 LIMIT 1", p.id);
+    const a = await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = ? AND active = 1 ORDER BY is_default DESC, id LIMIT 1", p.id, kindWanted)
+      ?? await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = 'bank' AND active = 1 ORDER BY is_default DESC, id LIMIT 1", p.id);
     if (!a) throw new HttpError(400, "no money account configured");
     accountId = a.id;
   }
