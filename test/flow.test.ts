@@ -141,11 +141,23 @@ describe("Lead → CA", () => {
     await ok("shaji", "POST", "/api/payments/transfers", { from_account_id: "acc_bank", to_account_id: "acc_petty", amount_paise: 300000 });
     const bal = await ok("sindhu", "GET", "/api/payments/accounts");
     const petty = bal.accounts.find((a: any) => a.id === "acc_petty");
-    expect(petty.balance_paise).toBe(500000 + 300000 - 120000);
+    expect(petty.balance_paise).toBe(300000 - 120000);
     const cash = bal.accounts.find((a: any) => a.id === "acc_cash");
     expect(cash.balance_paise).toBe(2000000 - 1750000);
     const exp = await ok("shaji", "GET", "/api/expenses?scope=all&period=" + new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 7));
     expect(exp.expenses.find((e: any) => e.kind === "normal" && e.amount_paise === 300000)).toBeUndefined(); // top-up is not an expense
+    // The petty cash book: each month opens with what the previous month closed at — the float is never reset.
+    const period = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 7);
+    const [y, m] = period.split("-").map(Number); const next = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}`;
+    const book = await ok("sindhu", "GET", `/api/expenses/petty-statement?period=${period}`);
+    expect(book.opening_paise).toBe(0);
+    expect(book.topups_paise).toBe(300000);
+    expect(book.spent_paise).toBe(120000);
+    expect(book.closing_paise).toBe(180000);
+    const after = await ok("shaji", "GET", `/api/expenses/petty-statement?period=${next}`);
+    expect(after.opening_paise).toBe(180000);
+    expect(after.closing_paise).toBe(180000);
+    expect((await api("prachi", "GET", `/api/expenses/petty-statement?period=${period}`)).status).toBe(403);
   });
 
   it("W4 · OTA payout settles to the paisa, posts commission/fee once, undo removes everything", async () => {

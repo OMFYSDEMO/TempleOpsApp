@@ -25,6 +25,39 @@ r.get("/", async (c) => {
   return c.json({ period, scope, expenses: rows, categories: CATEGORIES });
 });
 
+/**
+ * Petty cash month statement. The opening is whatever the previous month closed at — the float carries
+ * forward, it is never reset — so top-ups, spend and closing read like a cash book.
+ */
+r.get("/petty-statement", async (c) => {
+  const p = c.get("property"); const actor = c.get("actor");
+  if (!allowed(actor, "petty_expenses") && !allowed(actor, "pnl_reports")) throw new HttpError(403, "not allowed");
+  const period = c.req.query("period") ?? todayIn(p.timezone).slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(period)) throw new HttpError(400, "period must be YYYY-MM");
+  const acct: any = await one(c.env.DB, "SELECT * FROM money_accounts WHERE property_id = ? AND kind = 'petty_cash' AND active = 1 ORDER BY id LIMIT 1", p.id);
+  if (!acct) throw new HttpError(404, "no petty cash account");
+  const start = `${period}-01`; const end = `${period}-31`;
+  const movement = async (where: string, ...args: unknown[]) => {
+    const row = await one<{ v: number }>(c.env.DB,
+      `SELECT COALESCE((SELECT SUM(CASE WHEN kind='refund' THEN -amount_paise ELSE amount_paise END) FROM payments WHERE account_id = ? AND status != 'void' AND ${where.replace(/@d/g, "received_on")}),0)
+            + COALESCE((SELECT SUM(amount_paise) FROM other_income WHERE account_id = ? AND voided_at IS NULL AND ${where.replace(/@d/g, "on_date")}),0)
+            + COALESCE((SELECT SUM(amount_paise) FROM transfers WHERE to_account_id = ? AND voided_at IS NULL AND ${where.replace(/@d/g, "on_date")}),0)
+            - COALESCE((SELECT SUM(amount_paise) FROM transfers WHERE from_account_id = ? AND voided_at IS NULL AND ${where.replace(/@d/g, "on_date")}),0)
+            - COALESCE((SELECT SUM(amount_paise) FROM expenses WHERE paid_from_account_id = ? AND voided_at IS NULL AND ${where.replace(/@d/g, "on_date")}),0) AS v`,
+      acct.id, ...args, acct.id, ...args, acct.id, ...args, acct.id, ...args, acct.id, ...args);
+    return row?.v ?? 0;
+  };
+  const opening = acct.opening_paise + await movement("@d < ?", start);
+  const inMonth = await movement("@d >= ? AND @d <= ?", start, end);
+  const transfers = await all(c.env.DB, `SELECT t.*, fa.name AS from_name, ta.name AS to_name FROM transfers t JOIN money_accounts fa ON fa.id = t.from_account_id JOIN money_accounts ta ON ta.id = t.to_account_id
+     WHERE t.property_id = ? AND (t.to_account_id = ? OR t.from_account_id = ?) AND t.voided_at IS NULL AND t.on_date >= ? AND t.on_date <= ? ORDER BY t.on_date`, p.id, acct.id, acct.id, start, end);
+  const topups = transfers.filter((t: any) => t.to_account_id === acct.id).reduce((a: number, t: any) => a + t.amount_paise, 0);
+  const out = transfers.filter((t: any) => t.from_account_id === acct.id).reduce((a: number, t: any) => a + t.amount_paise, 0);
+  const spent = (await one<{ v: number }>(c.env.DB, "SELECT COALESCE(SUM(amount_paise),0) AS v FROM expenses WHERE paid_from_account_id = ? AND voided_at IS NULL AND on_date >= ? AND on_date <= ?", acct.id, start, end))?.v ?? 0;
+  const received = inMonth + spent + out - topups; // collections / other income that landed in petty cash directly
+  return c.json({ period, account: { id: acct.id, name: acct.name, opening_paise: acct.opening_paise, opening_date: acct.opening_date }, opening_paise: opening, topups_paise: topups, received_paise: received, spent_paise: spent, paid_out_paise: out, closing_paise: opening + inMonth, transfers });
+});
+
 r.post("/", async (c) => {
   const p = c.get("property"); const actor = c.get("actor");
   const x = await body(c);

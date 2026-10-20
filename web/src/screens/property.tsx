@@ -123,21 +123,38 @@ export function Tasks({ refs }: { me: Me; refs: Ref }) {
 
 const CATS = [["repairs", "Repairs"], ["fnb", "F&B"], ["housekeeping", "Housekeeping"], ["amenities", "Amenities"], ["utilities", "Utilities"], ["misc", "Misc"]] as const;
 
+const SCOPES = [["petty", "Petty cash"], ["bank", "Bank-paid"], ["all", "All"]] as const;
 export function Expenses({ me, refs }: { me: Me; refs: Ref }) {
   const [period, setPeriod] = useState(thisPeriod());
-  const q = useLoad(() => get(`/expenses?scope=petty&period=${period}`), [period]);
+  const canSeeAll = me.capabilities.includes("pnl_reports"); const canSeeBank = me.capabilities.includes("bank_expenses");
+  const [scope, setScope] = useState<"petty" | "bank" | "all">(canSeeAll ? "all" : "petty");
+  const q = useLoad(() => get(`/expenses?scope=${scope}&period=${period}`), [period, scope]);
+  const stmt = useLoad(() => get(`/expenses/petty-statement?period=${period}`), [period]);
   const accounts = useLoad(() => get("/payments/accounts"), []);
   const [edit, setEdit] = useState<Record<string, any>>({});
   const petty = accounts.data?.accounts.find((a: any) => a.kind === "petty_cash");
-  const topups = useLoad(() => get("/payments/transfers"), []);
+  const st = stmt.data;
+  const monthName = new Date(period + "-01T00:00:00").toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const scopeOptions = SCOPES.filter(([v]) => v === "petty" || (v === "bank" && canSeeBank) || (v === "all" && canSeeAll)).map(([value, label]) => ({ value, label }));
   return <>
-    <h2>Expenses & petty cash <small>W5 · petty cash is the property manager's; the bank is the owner's</small></h2>
-    <div class="kpi"><div class="k"><small>Petty cash in hand</small><b>{petty ? inr(petty.balance_paise) : "—"}</b></div><div class="k"><small>Spent this month (petty)</small><b>{accounts.data ? inr(accounts.data.spent_this_month.find((s: any) => s.account_id === petty?.id)?.spent_paise ?? 0) : "—"}</b></div><div class="k"><small>Top-ups this month</small><b>{topups.data ? inr(topups.data.transfers.filter((t: any) => t.to_account_id === petty?.id && t.on_date.startsWith(period)).reduce((a: number, t: any) => a + t.amount_paise, 0)) : "—"}</b></div></div>
+    <h2>Expenses & petty cash <small>petty cash is the property manager's float; the bank is the owner's</small></h2>
+    <div class="kpi"><div class="k"><small>Petty cash in hand today</small><b>{petty ? inr(petty.balance_paise) : "—"}</b></div><div class="k"><small>Opening · carried into {monthName.split(" ")[0]}</small><b>{st ? inr(st.opening_paise) : "—"}</b></div><div class="k"><small>Spent in {monthName.split(" ")[0]} (petty)</small><b>{st ? inr(st.spent_paise) : "—"}</b></div><div class="k"><small>Top-ups in {monthName.split(" ")[0]}</small><b>{st ? inr(st.topups_paise) : "—"}</b></div></div>
     <Field label="Month"><input type="month" value={period} onInput={(e: any) => setPeriod(e.currentTarget.value)} /></Field>
-    <Card title="Capture first, classify later" sub="use the + button; vendor and bill number can be filled from the photo here">{!q.data ? <Loading error={q.error} /> : q.data.expenses.length === 0 ? <Empty>No petty-cash expenses in {period}.</Empty> : q.data.expenses.map((e: any) => { const ed = edit[e.id]; return <div class="row" key={e.id}><div style="flex:1"><div>{e.category} · {e.description ?? "—"} {e.voided_at && <Status s="void" />}{e.kind !== "normal" && <Status s={e.kind} />}</div><div class="sub">{fmtDate(e.on_date)} · {e.account_name} · {e.vendor_name ?? <span style="color:var(--amb)">vendor missing</span>} · {e.bill_no ?? <span style="color:var(--amb)">bill no. missing</span>}{e.vendor_gstin ? ` · GSTIN ✓` : ""}{e.bill_photo_key ? <> · <a href={`/api/files/${e.bill_photo_key}`} target="_blank">photo</a></> : ""}</div>
+    <Card title={`Petty cash book · ${monthName}`} sub="the closing balance carries forward as next month's opening — the float is never reset" tone={st && st.closing_paise < 0 ? "amb" : undefined}>
+      {!st ? <Loading error={stmt.error} /> : <>
+        <Row label="Opening balance" sub="carried forward from the previous month" value={inr(st.opening_paise)} />
+        {st.transfers.filter((t: any) => t.to_account_id === st.account.id).map((t: any) => <Row key={t.id} label={`+ Top-up from ${t.from_name}`} sub={`${fmtDate(t.on_date)}${t.note ? ` · ${t.note}` : ""}`} value={inr(t.amount_paise)} />)}
+        {st.received_paise !== 0 && <Row label="+ Received into petty cash" sub="collections or other income recorded against this float" value={inr(st.received_paise)} />}
+        <Row label="− Spent from petty cash" sub={`${q.data && scope === "petty" ? q.data.expenses.filter((e: any) => !e.voided_at).length + " bills · " : ""}see the list below`} value={inr(st.spent_paise)} />
+        {st.transfers.filter((t: any) => t.from_account_id === st.account.id).map((t: any) => <Row key={t.id} label={`− Paid out to ${t.to_name}`} sub={`${fmtDate(t.on_date)}${t.note ? ` · ${t.note}` : ""}`} value={inr(t.amount_paise)} />)}
+        <Row strong label="Closing balance" sub={st.closing_paise < 0 ? "negative: a top-up or the opening float is missing from the books" : "carries into next month"} value={inr(st.closing_paise)} />
+      </>}
+    </Card>
+    {scopeOptions.length > 1 && <Chips value={scope} options={scopeOptions} onChange={setScope} />}
+    <Card title={scope === "petty" ? "Petty-cash bills" : scope === "bank" ? "Bank-paid bills" : "All bills this month"} sub={scope === "petty" ? "capture first, classify later: vendor and bill number can be filled from the photo here" : "petty cash and bank together, as the P&L counts them"}>{!q.data ? <Loading error={q.error} /> : q.data.expenses.length === 0 ? <Empty>No {scope === "all" ? "" : scope === "bank" ? "bank-paid " : "petty-cash "}expenses in {monthName}.</Empty> : q.data.expenses.map((e: any) => { const ed = edit[e.id]; return <div class="row" key={e.id}><div style="flex:1"><div>{e.category} · {e.description ?? "—"} {e.voided_at && <Status s="void" />}{e.kind !== "normal" && <Status s={e.kind} />}</div><div class="sub">{fmtDate(e.on_date)} · {e.account_name} · {e.vendor_name ?? <span style="color:var(--amb)">vendor missing</span>} · {e.bill_no ?? <span style="color:var(--amb)">bill no. missing</span>}{e.vendor_gstin ? ` · GSTIN ✓` : ""}{e.bill_photo_key ? <> · <a href={`/api/files/${e.bill_photo_key}`} target="_blank">photo</a></> : ""}</div>
       {ed && <div class="grid two"><Field label="Vendor"><input value={ed.vendor_name ?? ""} onInput={(ev: any) => setEdit({ ...edit, [e.id]: { ...ed, vendor_name: ev.currentTarget.value } })} /></Field><Field label="Bill no."><input value={ed.bill_no ?? ""} onInput={(ev: any) => setEdit({ ...edit, [e.id]: { ...ed, bill_no: ev.currentTarget.value } })} /></Field><Field label="Vendor GSTIN"><input value={ed.vendor_gstin ?? ""} onInput={(ev: any) => setEdit({ ...edit, [e.id]: { ...ed, vendor_gstin: ev.currentTarget.value } })} /></Field><Field label="Category"><select value={ed.category} onChange={(ev: any) => setEdit({ ...edit, [e.id]: { ...ed, category: ev.currentTarget.value } })}>{CATS.map(([v, l]) => <option value={v}>{l}</option>)}</select></Field><div class="actions end"><Btn small onClick={() => { const n = { ...edit }; delete n[e.id]; setEdit(n); }}>Cancel</Btn><Btn small kind="primary" onClick={() => run(async () => { await patch(`/expenses/${e.id}`, ed); const n = { ...edit }; delete n[e.id]; setEdit(n); await q.reload(); }, "Updated · audited")}>Save</Btn></div></div>}
-    </div><div class="actions"><b class="num">{inr(e.amount_paise)}</b>{!e.voided_at && e.kind === "normal" && !ed && <Btn small onClick={() => setEdit({ ...edit, [e.id]: { vendor_name: e.vendor_name, bill_no: e.bill_no, vendor_gstin: e.vendor_gstin, category: e.category } })}>Classify</Btn>}</div></div>; })}</Card>
-    <div class="muted">Bank-paid bills (electricity, subscriptions, professional fees) are on the owner's Bank expenses screen. {me.property.gstin ? "GST on purchases is recorded for the register; it is not creditable while rooms are supplied at the 5% slab." : ""}</div>
+    </div><div class="actions"><b class="num">{inr(e.amount_paise)}</b>{!e.voided_at && e.kind === "normal" && !ed && (e.account_kind === "bank" ? canSeeBank : true) && <Btn small onClick={() => setEdit({ ...edit, [e.id]: { vendor_name: e.vendor_name, bill_no: e.bill_no, vendor_gstin: e.vendor_gstin, category: e.category } })}>Classify</Btn>}</div></div>; })}</Card>
+    <div class="muted">{canSeeBank ? "New bank-paid bills and petty-cash top-ups are recorded on the Bank expenses screen." : "Bank-paid bills (electricity, subscriptions, professional fees) are recorded by the owner."} {me.property.gstin ? "GST on purchases is recorded for the register; it is not creditable while rooms are supplied at the 5% slab." : ""}</div>
     <span hidden>{refs.locations.length}</span>
   </>;
 }

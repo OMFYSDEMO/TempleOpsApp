@@ -44,5 +44,5 @@ INSERT OR IGNORE INTO channels (id, property_id, code, name, collection_type, co
 INSERT OR IGNORE INTO money_accounts (id, property_id, kind, name, holder_role, opening_paise, opening_date) VALUES
  ('acc_bank',  'prop_meadows', 'bank',       'Bank (current a/c)', 'owner',    0,      '2026-09-01'),
  ('acc_cash',  'prop_meadows', 'cash',       'Cash in hand',       'property', 0,      '2026-09-01'),
- ('acc_petty', 'prop_meadows', 'petty_cash', 'Petty cash',         'property', 500000, '2026-09-01'),
+ ('acc_petty', 'prop_meadows', 'petty_cash', 'Petty cash',         'property', 0,      '2026-09-01'),
  ('acc_gw',    'prop_meadows', 'gateway',    'Airpay clearing',    'owner',    0,      '2026-09-01');
