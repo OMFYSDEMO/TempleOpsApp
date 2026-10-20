@@ -35,14 +35,21 @@ jobs:
           zone=$(api "https://api.cloudflare.com/client/v4/zones?name=$domain" | jq -r '.result[0].id // empty')
           [ -n "$zone" ] || fail "zone $domain is not visible to this token"
           echo "Zone $domain: $zone"
-          echo "Existing MX records (mail already delivered elsewhere if any are not Cloudflare's):"
-          api "https://api.cloudflare.com/client/v4/zones/$zone/dns_records?type=MX&per_page=50" | jq -r '.result[] | "- \(.name) → \(.content) (prio \(.priority))"'
-          foreign=$(api "https://api.cloudflare.com/client/v4/zones/$zone/dns_records?type=MX&per_page=50" | jq -r --arg d "$domain" '[.result[] | select(.name == $d and (.content | test("mx.cloudflare.net") | not))] | length')
+          mx=$(api "https://api.cloudflare.com/client/v4/zones/$zone/dns_records?type=MX&per_page=50")
+          if [ "$(echo "$mx" | jq -r '.success')" != "true" ]; then
+            echo "$mx" | jq -r '.errors[]? | "::warning::DNS read refused: \(.code) \(.message) — the token needs Zone → DNS: Read/Edit to check and set MX records"'
+            foreign="unknown"
+          else
+            echo "Existing MX records (mail already delivered elsewhere if any are not Cloudflare's):"
+            echo "$mx" | jq -r '(.result // [])[] | "- \(.name) → \(.content) (prio \(.priority))"'
+            foreign=$(echo "$mx" | jq -r --arg d "$domain" '[(.result // [])[] | select(.name == $d and (.content | test("mx.cloudflare.net") | not))] | length')
+          fi
           st=$(api "https://api.cloudflare.com/client/v4/zones/$zone/email/routing")
           echo "$st" | jq -c '{success, enabled: .result.enabled, status: .result.status, errors}'
           if [ "$(echo "$st" | jq -r '.success')" != "true" ]; then fail "the token cannot read Email Routing on this zone; add 'Zone → Email Routing Rules: Edit' to it, or do step 8 of docs/deploy-cloudflare.md in the dashboard"; fi
           enabled=$(echo "$st" | jq -r '.result.enabled')
           if [ "$enabled" != "true" ]; then
+            if [ "$foreign" = "unknown" ]; then fail "cannot see the zone's MX records, so enabling Email Routing is not safe to automate; add Zone → DNS: Edit to the token or enable it in the dashboard"; fi
             if [ "$foreign" != "0" ]; then fail "$domain already has non-Cloudflare MX records: enabling Email Routing would take over its mail. Use a subdomain (e.g. inbox@mail.$domain) instead."; fi
             if [ "$CONFIRM" != "apply" ]; then echo "would enable Email Routing on $domain (adds MX/SPF records)"; else
               r=$(api -X POST "https://api.cloudflare.com/client/v4/zones/$zone/email/routing/enable"); echo "$r" | jq -c '{success, errors}'
