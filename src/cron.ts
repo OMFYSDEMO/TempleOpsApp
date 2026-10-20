@@ -2,6 +2,8 @@ import type { Env } from "./env";
 import { Batch, all } from "./db";
 import { nowIso } from "./domain/dates";
 import { notifyRole, notifyUser } from "./services/notify";
+import { PARSER_VERSION } from "./email/parsers";
+import { reparseItem } from "./routes/inbox";
 
 /**
  * Every few minutes: release expired holds and quotes, nudge the salesperson at 15 minutes,
@@ -39,6 +41,9 @@ export async function runCron(env: Env) {
       await notifyRole(b, p.id, "revenue", "lead_escalation", `${l.name ?? "A lead"} unanswered for ${p.lead_escalate_minutes} min`, { kind: "lead", id: l.id });
       b.add("UPDATE leads SET escalated_at = ? WHERE id = ?", now, l.id);
     }
+    // Inbox items still waiting that were read by an older parser: read them again, so a template fix reaches old cards.
+    const stale = await all<any>(env.DB, "SELECT id FROM inbox_items WHERE property_id = ? AND status IN ('pending','routed') AND auto_applied = 0 AND raw_key IS NOT NULL AND (parser_version IS NULL OR parser_version != ?) ORDER BY received_at LIMIT 20", p.id, PARSER_VERSION);
+    for (const it of stale) { try { await reparseItem(env, p.id, it.id, null); } catch (e) { console.error("inbox re-read failed", it.id, e); } }
     if (b.size) await b.run();
   }
 }

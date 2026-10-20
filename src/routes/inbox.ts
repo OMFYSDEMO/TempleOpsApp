@@ -2,6 +2,7 @@ import { newRouter, requireCap, body, str, optStr, int, date } from "../app";
 import { Batch, HttpError, all, one, id, loadProperty } from "../db";
 import { nowIso } from "../domain/dates";
 import { splitInclusive } from "../domain/money";
+import PostalMime from "postal-mime";
 import { parseInboundEmail, PARSER_VERSION, type ParsedEmail } from "../email/parsers";
 import { createBooking, gstPolicy } from "../services/bookings";
 import { autoApply } from "../services/inboxAuto";
@@ -18,33 +19,66 @@ r.get("/", async (c) => {
   return c.json({ items: rows.map((x: any) => ({ ...x, parsed: x.parsed_json ? JSON.parse(x.parsed_json) : null })) });
 });
 
-/** Shared with the Email Worker: store an inbound email as an inbox item (duplicates flagged, payments routed). */
+/** Status an email starts in: a known reservation is a duplicate; a payment routes to the Payments screen. */
+async function initialStatus(env: Env, propertyId: string, parsed: ParsedEmail): Promise<string> {
+  if (parsed.external_ref && parsed.kind === "new_reservation") {
+    const dup = await one(env.DB, "SELECT id FROM bookings WHERE property_id = ? AND external_ref = ?", propertyId, parsed.external_ref);
+    if (dup) return "duplicate";
+  }
+  return parsed.kind === "payment" ? "routed" : "pending";
+}
+
+/** Run automation on a stored item and return the outcome plus the row as it now stands. */
+async function applyAutomation(env: Env, propertyId: string, iid: string, status: string, parsed: ParsedEmail, subject: string) {
+  const property = await loadProperty(env.DB, propertyId);
+  let auto: Awaited<ReturnType<typeof autoApply>> | null = null;
+  if (property.inbox_automation === 1 && (status === "pending" || status === "routed")) {
+    auto = await autoApply(env.DB, property, { id: iid, kind: parsed.kind, source: parsed.source, external_ref: parsed.external_ref, subject }, parsed);
+    if (!auto.applied && auto.note !== "already recorded") await env.DB.prepare("UPDATE inbox_items SET auto_note = ? WHERE id = ?").bind(auto.note, iid).run();
+  }
+  const row = await one<{ status: string; booking_id: string | null; payment_id: string | null }>(env.DB, "SELECT status, booking_id, payment_id FROM inbox_items WHERE id = ?", iid);
+  return { id: iid, status: row?.status ?? status, booking_id: row?.booking_id ?? null, payment_id: row?.payment_id ?? null, auto, parsed };
+}
+
+/** Shared with the Email Worker: store an inbound email as an inbox item (duplicates flagged, payments routed), then apply it. */
 export async function ingestEmail(env: Env, propertyId: string, msg: { message_id: string | null; from: string; subject: string; html?: string; text?: string; raw?: ArrayBuffer | null; received_at?: string }) {
   const parsed = parseInboundEmail(msg.from, msg.subject, msg.html, msg.text);
   const iid = id("inb");
+  // Keep the original: the .eml from Email Routing, or the pasted text, so the item can be re-read after a parser update.
   let rawKey: string | null = null;
   if (msg.raw) { rawKey = `inbox/${propertyId}/${iid}.eml`; await env.FILES.put(rawKey, msg.raw, { httpMetadata: { contentType: "message/rfc822" } }); }
-  let status = "pending";
-  if (parsed.external_ref && parsed.kind === "new_reservation") {
-    const dup = await one(env.DB, "SELECT b.id FROM bookings b JOIN channels ch ON ch.id = b.channel_id WHERE b.property_id = ? AND b.external_ref = ?", propertyId, parsed.external_ref);
-    if (dup) status = "duplicate";
-  }
-  if (parsed.kind === "payment") status = "routed"; // Sindhu's Payments screen picks these up
+  else if (msg.text || msg.html) { rawKey = `inbox/${propertyId}/${iid}.txt`; await env.FILES.put(rawKey, JSON.stringify({ from: msg.from, subject: msg.subject, text: msg.text ?? null, html: msg.html ?? null }), { httpMetadata: { contentType: "application/json" } }); }
+  const status = await initialStatus(env, propertyId, parsed);
   const b = new Batch(env.DB, null);
   b.add(`INSERT INTO inbox_items (id, property_id, source, kind, message_id, from_addr, subject, received_at, raw_key, parsed_json, parser_version, external_ref, status)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     iid, propertyId, parsed.source, parsed.kind, msg.message_id, msg.from, msg.subject, msg.received_at ?? nowIso(), rawKey, JSON.stringify({ ...parsed.data, confidence: parsed.confidence }), PARSER_VERSION, parsed.external_ref, status);
   b.audit("inbox.ingest", "inbox_item", iid, null, { source: parsed.source, kind: parsed.kind, status, confidence: parsed.confidence });
   await b.run();
-  // Automation: apply it now when the facts line up; otherwise the card carries the reason it waited.
-  const property = await loadProperty(env.DB, propertyId);
-  let auto: Awaited<ReturnType<typeof autoApply>> | null = null;
-  if (property.inbox_automation === 1 && (status === "pending" || status === "routed")) {
-    auto = await autoApply(env.DB, property, { id: iid, kind: parsed.kind, source: parsed.source, external_ref: parsed.external_ref, subject: msg.subject }, parsed);
-    if (!auto.applied && auto.note !== "already recorded") await env.DB.prepare("UPDATE inbox_items SET auto_note = ? WHERE id = ?").bind(auto.note, iid).run();
-  }
-  const row = await one<{ status: string; booking_id: string | null; payment_id: string | null }>(env.DB, "SELECT status, booking_id, payment_id FROM inbox_items WHERE id = ?", iid);
-  return { id: iid, status: row?.status ?? status, booking_id: row?.booking_id ?? null, payment_id: row?.payment_id ?? null, auto, parsed };
+  return applyAutomation(env, propertyId, iid, status, parsed, msg.subject);
+}
+
+/**
+ * Re-read a waiting item from its stored original with the current parser, then apply it. Used by the
+ * "Re-read" button and by the cron sweep after a parser update, so a template fix reaches old cards too.
+ */
+export async function reparseItem(env: Env, propertyId: string, itemId: string, actorId: string | null) {
+  const item: any = await one(env.DB, "SELECT * FROM inbox_items WHERE id = ? AND property_id = ?", itemId, propertyId);
+  if (!item) throw new HttpError(404, "inbox item not found");
+  if (!["pending", "routed"].includes(item.status)) throw new HttpError(409, `item is ${item.status}`);
+  let from = item.from_addr ?? "", subject = item.subject ?? "", html: string | undefined, text: string | undefined;
+  const obj = item.raw_key ? await env.FILES.get(item.raw_key) : null;
+  if (obj && item.raw_key.endsWith(".eml")) { const m = await PostalMime.parse(await obj.arrayBuffer()); from = m.from?.address ?? from; subject = m.subject ?? subject; html = m.html ?? undefined; text = m.text ?? undefined; }
+  else if (obj) { const j = JSON.parse(await obj.text()); from = j.from ?? from; subject = j.subject ?? subject; text = j.text ?? undefined; html = j.html ?? undefined; }
+  else { const d = JSON.parse(item.parsed_json ?? "{}"); text = d.preview ?? ""; }
+  const parsed = parseInboundEmail(from, subject, html, text);
+  const status = await initialStatus(env, propertyId, parsed);
+  const b = new Batch(env.DB, null);
+  b.add("UPDATE inbox_items SET source = ?, kind = ?, parsed_json = ?, parser_version = ?, external_ref = ?, status = ?, auto_note = NULL WHERE id = ?",
+    parsed.source, parsed.kind, JSON.stringify({ ...parsed.data, confidence: parsed.confidence }), PARSER_VERSION, parsed.external_ref, status, item.id);
+  b.audit("inbox.reparse", "inbox_item", item.id, { source: item.source, kind: item.kind, parser_version: item.parser_version }, { source: parsed.source, kind: parsed.kind, parser_version: PARSER_VERSION, by: actorId ?? "cron" });
+  await b.run();
+  return applyAutomation(env, propertyId, item.id, status, parsed, subject);
 }
 
 /** Manual ingest (paste an email) — the same code path the Email Worker uses, handy before DNS is set up. */
@@ -54,6 +88,8 @@ r.post("/ingest", async (c) => {
   const res = await ingestEmail(c.env, p.id, { message_id: optStr(x.message_id, "message_id"), from: str(x.from, "from"), subject: str(x.subject, "subject"), html: optStr(x.html, "html") ?? undefined, text: optStr(x.text, "text") ?? undefined, raw: null });
   return c.json(res, 201);
 });
+
+r.post("/:id/reparse", async (c) => c.json(await reparseItem(c.env, c.get("property").id, c.req.param("id"), c.get("actor").id)));
 
 /** Edit the parsed fields before approving (the mock's "Edit"). */
 r.patch("/:id", async (c) => {

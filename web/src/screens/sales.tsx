@@ -73,6 +73,7 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
           <Field label="Nightly rate ex-GST (₹) — leave blank to take it from the email"><input inputMode="decimal" value={rate[it.id] ?? ""} onInput={(e: any) => setRate({ ...rate, [it.id]: e.currentTarget.value })} /></Field></div>}
         </div>
         {it.status === "pending" && <div class="actions end"><Btn kind="danger" onClick={() => run(async () => { await post(`/inbox/${it.id}/dismiss`, { reason: "manual" }); await q.reload(); }, "Dismissed")}>Dismiss</Btn>
+          <Btn onClick={() => run(async () => { const r = await post(`/inbox/${it.id}/reparse`); await q.reload(); toast(r.auto?.applied ? `Applied automatically: ${r.auto.what}` : r.auto?.note ? `Read again · still waiting: ${r.auto.note}` : `Read again · ${r.status}`); })}>Re-read</Btn>
           {(it.kind === "new_reservation" || it.kind === "cancellation") && <Btn kind="primary" disabled={it.kind === "new_reservation" && sel.length === 0} onClick={() => run(async () => { await post(`/inbox/${it.id}/approve`, { room_ids: sel, ...(rate[it.id] ? { nightly_rate_paise: Math.round(Number(rate[it.id]) * 100) } : {}) }); await q.reload(); }, it.kind === "cancellation" ? "Booking cancelled" : "Posted to the books · audited")}>Approve</Btn>}</div>}
         {it.booking_id && <div class="muted">Booking {it.booking_id}</div>}
       </Card>;

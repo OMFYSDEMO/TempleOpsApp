@@ -38,7 +38,8 @@ INSERT OR IGNORE INTO channels (id, property_id, code, name, collection_type, co
  ('ch_bcom',     'prop_meadows', 'booking_com', 'Booking.com', 'channel_collect', 2300, 'ex_gst', 199, 'gross', 0, 0),
  ('ch_bcom_hc',  'prop_meadows', 'booking_com_hotel_collect', 'Booking.com (pay at property)', 'hotel_collect', 1500, 'ex_gst', 0, 'gross', 0, 0),
  ('ch_agoda',    'prop_meadows', 'agoda',       'Agoda',       'channel_collect', 2000, 'ex_gst', 0,   'gross', 0, 0),
- ('ch_mmt',      'prop_meadows', 'makemytrip',  'MakeMyTrip',  'channel_collect', 2200, 'ex_gst', 0,   'gross', 0, 0);
+ ('ch_mmt',      'prop_meadows', 'makemytrip',  'MakeMyTrip',  'channel_collect', 2200, 'ex_gst', 0,   'gross', 0, 0),
+ ('ch_goibibo',  'prop_meadows', 'goibibo',     'Goibibo',     'channel_collect', 2083, 'ex_gst', 0,   'gross', 0, 0);
 
 -- Money accounts: the cash ledger. Bank is the owner's; cash and petty cash are the property manager's.
 INSERT OR IGNORE INTO money_accounts (id, property_id, kind, name, holder_role, opening_paise, opening_date) VALUES

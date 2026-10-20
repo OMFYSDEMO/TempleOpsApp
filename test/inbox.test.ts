@@ -59,6 +59,26 @@ describe("Inbox automation", () => {
     expect(gw.items.find((i: any) => i.id === stray.id)).toBeTruthy();
   });
 
+  it("reads a Gmail-forwarded STAAH notification in the real label-above-value layout and books it", async () => {
+    // The forwarder's signature comes first; the STAAH sender and the table follow the "Forwarded message" marker.
+    const text = `Kind Regards,\n\nShaji Anandan\nDirector - Sales & Marketing\nThe Meadows | Varkala\nGST - 32AARCM3606J1ZD\n\n============ Forwarded message ============\nFrom:  <noreply@staah.com>\nTo: <bookings@meadowsvarkala.com>\nDate: Mon, 19 Oct 2026 19:46:18 +0100\nSubject: New Reservation Goibibo for kumar Reservation No:0190589681 (1060900000001400) - The Meadows Varkala\n============ Forwarded message ============\nReservation Confirmation\nChannel Name: Goibibo\nBookings Status: Confirmed\nBooking Id#: 0190589681 (1060900000001400)\nGuest Details\nCONTACT NAME\nsaurav kumar\nCONTACT NUMBER\nALTERNATIVE NUMBER\nEMAIL\nBooking Details\nHOTEL\nThe Meadows Varkala\nBOOKING REFERENCE\n0190589681 (1060900000001400)\nADDRESS\n133/B, Marakkadamukku, Palachira PO.\nROOM TYPE\nPremium - Premium Room_CP\nNO OF ROOMS\n1\nCHECK-IN\n20 Jan 2027\nCHECK-OUT\n22 Jan 2027\nNO OF NIGHTS\n2\nDATE\n20 Jan 2027\nGUEST NAME\nsaurav kumar\nADULTS\n2\nCHILDREN\n1\nBEDDING\n--\nAMOUNT\nINR5,852.25\n21 Jan 2027\nsaurav kumar\n2\n1\n--\nINR5,852.25\n(Age of child 1:3)\nAdditional Information:\nChannel collect, Inclusions : Breakfast included , VendorName:: MakeMyTrip, Vendor BookingId:: NH7201234,\nPayment Type: Channel Collect\nCommission : INR 2,437.29\nRoom Total : INR 11,704.50\nTotal Taxes : INR 688.50\nTotal (All Inclusive): INR 12,393.00`;
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "bookings@meadowsvarkala.com", subject: "Fwd: New Reservation Goibibo for kumar Reservation No:0190589681 (1060900000001400) - The Meadows Varkala", text });
+    expect(ing.parsed.source).toBe("staah"); expect(ing.parsed.kind).toBe("new_reservation");
+    expect(ing.parsed.external_ref).toBe("1060900000001400"); expect(ing.parsed.data.ota_ref).toBe("0190589681");
+    expect(ing.parsed.data).toMatchObject({ channel: "Goibibo", guest_name: "saurav kumar", room_name: "Premium", rooms: 1, nights: 2, adults: 2, children: 1, check_in: "2027-01-20", check_out: "2027-01-22", room_total_paise: 1170450, taxes_paise: 68850, total_incl_gst_paise: 1239300, commission_paise: 243729, collection_type: "channel_collect" });
+    expect(ing.parsed.confidence).toBe("high");
+    expect(ing.status).toBe("approved"); expect(ing.auto.what).toBe("booked");
+    const bk = (await sql("SELECT channel_id, room_total_paise, external_ref FROM bookings WHERE id = ?", ing.booking_id))[0] as any;
+    expect(bk.channel_id).toBe("ch_goibibo"); expect(bk.room_total_paise).toBe(1170450); expect(bk.external_ref).toBe("1060900000001400");
+    expect((await sql("SELECT room_id FROM room_nights WHERE booking_id = ?", ing.booking_id))[0].room_id).toBe("loc_r2");
+    // Re-reading a waiting card re-runs the parser and automation; a done card is left alone.
+    expect((await api("prachi", "POST", `/api/inbox/${ing.id}/reparse`)).status).toBe(409);
+    const unknown = await ok("prachi", "POST", "/api/inbox/ingest", { from: "someone@example.com", subject: "hello", text: "nothing to see" });
+    expect(unknown.status).toBe("pending");
+    const re = await ok("prachi", "POST", `/api/inbox/${unknown.id}/reparse`);
+    expect(re.status).toBe("pending"); expect(re.parsed.source).toBe("unknown");
+  });
+
   it("does nothing on its own when the owner switches automation off", async () => {
     await ok("shaji", "PATCH", "/api/admin/property", { inbox_automation: false });
     const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@staah.com", subject: "STAAH · New reservation · Agoda", text: "Channel: Agoda\nRef: 7000000000000009\nGuest: Lina P\nRoom: Executive ×1\nCheck-in: 05/01/2027\nCheck-out: 06/01/2027\nRoom Total: ₹5,000.00 (ex-GST)" });
