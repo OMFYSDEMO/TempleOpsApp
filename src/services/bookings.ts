@@ -30,7 +30,7 @@ export interface CreateBookingInput {
 }
 
 export function gstPolicy(p: PropertyRow): GstPolicy {
-  return { gstin: p.gstin, thresholdPaise: p.gst_threshold_paise, belowBp: p.gst_rate_below_bp, aboveBp: p.gst_rate_above_bp };
+  return { gstin: p.gstin, nilUptoPaise: p.gst_nil_upto_paise ?? 100_000, thresholdPaise: p.gst_threshold_paise, belowBp: p.gst_rate_below_bp, aboveBp: p.gst_rate_above_bp };
 }
 
 export async function findOrCreateGuest(b: Batch, propertyId: string, g: CreateBookingInput["guest"]): Promise<string> {

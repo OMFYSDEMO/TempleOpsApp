@@ -3,13 +3,15 @@ import { applyBp, type Paise } from "./money";
 export interface GstPolicy {
   /** NULL/empty GSTIN means the property may not charge GST at all (F2). */
   gstin: string | null;
+  /** Declared tariff per room-night at or below which no GST is charged (nil band). */
+  nilUptoPaise: Paise;
   /** Declared tariff per room-night at or below which the lower slab applies. */
   thresholdPaise: Paise;
   belowBp: number;   // 500  = 5% without input credit
   aboveBp: number;   // 1800 = 18% with input credit
 }
 
-export const DEFAULT_GST_POLICY: GstPolicy = { gstin: null, thresholdPaise: 750_000, belowBp: 500, aboveBp: 1800 };
+export const DEFAULT_GST_POLICY: GstPolicy = { gstin: null, nilUptoPaise: 100_000, thresholdPaise: 750_000, belowBp: 500, aboveBp: 1800 };
 
 export function gstApplicable(p: GstPolicy): boolean {
   return !!p.gstin && p.gstin.trim().length > 0;
@@ -17,10 +19,12 @@ export function gstApplicable(p: GstPolicy): boolean {
 
 /**
  * Slab for one room-night. The slab is decided by the declared tariff for that room-night
- * (ex-GST), not by what was collected. "Up to ₹7,500" is inclusive.
+ * (ex-GST), not by what was collected. Bands are inclusive at the top:
+ * up to ₹1,000 nil, up to ₹7,500 the lower slab (5%), above that the upper slab (18%).
  */
 export function slabBpForRoomNight(p: GstPolicy, declaredTariffPaise: Paise): number {
   if (!gstApplicable(p)) return 0;
+  if (declaredTariffPaise <= p.nilUptoPaise) return 0;
   return declaredTariffPaise <= p.thresholdPaise ? p.belowBp : p.aboveBp;
 }
 

@@ -44,12 +44,19 @@ describe("dates", () => {
 });
 
 describe("gst", () => {
-  const registered: GstPolicy = { gstin: "32AAACX1234A1Z5", thresholdPaise: 750000, belowBp: 500, aboveBp: 1800 };
+  const registered: GstPolicy = { gstin: "32AAACX1234A1Z5", nilUptoPaise: 100000, thresholdPaise: 750000, belowBp: 500, aboveBp: 1800 };
   const unregistered: GstPolicy = { ...registered, gstin: null };
   it("slab is per room-night on declared tariff, threshold inclusive", () => {
     expect(slabBpForRoomNight(registered, 750000)).toBe(500);
     expect(slabBpForRoomNight(registered, 750001)).toBe(1800);
     expect(slabBpForRoomNight(registered, 600000)).toBe(500);
+  });
+  it("up to ₹1,000 per room-night is nil-rated", () => {
+    expect(slabBpForRoomNight(registered, 100000)).toBe(0);
+    expect(slabBpForRoomNight(registered, 100001)).toBe(500);
+    const l = computeRoomLine(registered, { roomId: "r", nights: 3, nightlyRatePaise: 90000 });
+    expect(l.gstPaise).toBe(0);
+    expect(l.grossPaise).toBe(270000);
   });
   it("no GST without a GSTIN", () => {
     expect(slabBpForRoomNight(unregistered, 600000)).toBe(0);

@@ -113,7 +113,7 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
 
 const nightsOf = (ci: string, co: string) => ci && co && ci < co ? Math.round((Date.parse(co) - Date.parse(ci)) / 86_400_000) : 0;
 const addDays = (iso: string, n: number) => new Date(Date.parse(iso) + n * 86_400_000).toISOString().slice(0, 10);
-const slabFor = (me: Me, tariff: number | null, rate: number) => !me.property.gstin ? 0 : (tariff ?? rate) <= me.property.gst_threshold_paise ? me.property.gst_rate_below_bp : me.property.gst_rate_above_bp;
+const slabFor = (me: Me, tariff: number | null, rate: number) => { const d = tariff ?? rate; return !me.property.gstin || d <= me.property.gst_nil_upto_paise ? 0 : d <= me.property.gst_threshold_paise ? me.property.gst_rate_below_bp : me.property.gst_rate_above_bp; };
 const CHANNEL_SHORT: Record<string, string> = { direct: "Direct", booking_com: "Booking.com", makemytrip: "MMT", goibibo: "Goibibo", agoda: "Agoda", cleartrip: "Cleartrip", expedia: "Expedia", yatra: "Yatra", swiftbook: "SwiftBook", referral: "Referral", agent: "Agent" };
 
 /** Who holds each room for a stay, from the availability endpoint. */
