@@ -4,6 +4,7 @@ import { nowIso } from "./domain/dates";
 import { notifyRole, notifyUser } from "./services/notify";
 import { PARSER_VERSION } from "./email/parsers";
 import { reparseItem } from "./routes/inbox";
+import { runEscalations } from "./services/work";
 
 /**
  * Every few minutes: release expired holds and quotes, nudge the salesperson at 15 minutes,
@@ -44,6 +45,8 @@ export async function runCron(env: Env) {
     // Inbox items still waiting that were read by an older parser: read them again, so a template fix reaches old cards.
     const stale = await all<any>(env.DB, "SELECT id FROM inbox_items WHERE property_id = ? AND status IN ('pending','routed') AND auto_applied = 0 AND raw_key IS NOT NULL AND (parser_version IS NULL OR parser_version != ?) ORDER BY received_at LIMIT 20", p.id, PARSER_VERSION);
     for (const it of stale) { try { await reparseItem(env, p.id, it.id, null); } catch (e) { console.error("inbox re-read failed", it.id, e); } }
+    // Work queue: raise what has waited past its tolerance to the next role, once.
+    try { await runEscalations(env, p, now); } catch (e) { console.error("work escalation failed", p.id, e); }
     if (b.size) await b.run();
   }
 }

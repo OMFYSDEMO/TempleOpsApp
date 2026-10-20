@@ -119,6 +119,7 @@ export async function loadActor(db: D1Database, email: string): Promise<Actor | 
 
 /** Role walls, enforced at the API (not just the menu). Owner keeps full rights as the safety net. */
 export const CAN: Record<string, Role[]> = {
+  work: ["sales", "property", "revenue", "owner", "accountant"],
   leads: ["sales", "revenue", "owner"],
   inbox: ["sales", "revenue", "owner"],
   bookings_write: ["sales", "revenue", "owner"],

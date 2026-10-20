@@ -5,6 +5,7 @@ import { readQueue, onQueueChange, flush } from "./offline";
 import { Leads, Inbox, Reservations, Availability } from "./screens/sales";
 import { FrontDesk, Payments, Invoices, Tasks, Expenses, QuickCapture } from "./screens/property";
 import { Approvals, Payouts, Reconcile, RevenueOverview, OwnerDashboard, BankExpenses, Admin, MonthClose, GstSheet, AuditLog } from "./screens/management";
+import { MyWork } from "./screens/work";
 import { Login, ResetPassword, ChangePassword } from "./screens/auth";
 import { Icon } from "./icons";
 
@@ -13,6 +14,7 @@ export interface Ref { locations: any[]; channels: any[]; accounts: any[]; users
 
 type Screen = { key: string; label: string; cap: string; group: string; comp: (p: { me: Me; refs: Ref }) => any; mobile?: boolean; icon: string };
 const SCREENS: Screen[] = [
+  { key: "work", label: "My work", cap: "work", group: "Today", comp: MyWork, mobile: true, icon: "tasks" },
   { key: "leads", label: "Leads", cap: "leads", group: "Sales", comp: Leads, mobile: true, icon: "leads" },
   { key: "inbox", label: "Inbox — bookings", cap: "inbox", group: "Sales", comp: Inbox, mobile: true, icon: "inbox" },
   { key: "resv", label: "Reservations", cap: "bookings_write", group: "Sales", comp: Reservations, mobile: true, icon: "calendar" },
