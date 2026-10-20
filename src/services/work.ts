@@ -15,6 +15,8 @@ export interface WorkItem {
 }
 
 export const ESCALATE_TO: Record<string, string | null> = { sales: "revenue", property: "owner", revenue: "owner", accountant: "owner", owner: null };
+/** Items that were already waiting when the queue went live are shown, but not raised with a notification. */
+export const QUEUE_LIVE_SINCE = "2026-10-20T12:00:00Z";
 
 /** Hours an item may wait before it is overdue. Start loose; tighten once the slip report shows what is normal. */
 export const TOLERANCE: Record<string, number> = {
@@ -101,7 +103,7 @@ export async function runEscalations(env: Env, p: PropertyRow, now = nowIso()) {
   let raised = 0, cleared = 0;
   for (const it of items) {
     const to = ESCALATE_TO[it.owner_role];
-    if (!it.overdue || !to || openKeys.has(it.key)) continue;
+    if (!it.overdue || !to || openKeys.has(it.key) || it.since < QUEUE_LIVE_SINCE) continue;
     b.add("INSERT INTO work_escalations (property_id, item_key, kind, title, owner_role, escalated_to, since, escalated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(property_id, item_key) DO UPDATE SET cleared_at = NULL, escalated_to = excluded.escalated_to, escalated_at = excluded.escalated_at, since = excluded.since",
       p.id, it.key, it.kind, it.title, it.owner_role, to, it.since, now);
     await notifyRole(b, p.id, to, "work_overdue", `Overdue with ${it.owner_role} for ${Math.round(it.waited_hours)} h: ${it.title}`, { kind: "work", id: it.key });
