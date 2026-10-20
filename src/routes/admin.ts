@@ -14,7 +14,7 @@ r.get("/me", async (c) => {
   const caps = Object.entries(CAN).filter(([, roles]) => roles.includes(actor.role)).map(([k]) => k);
   const unread = await one<{ n: number }>(c.env.DB, "SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL", actor.id);
   const cred = await one<{ must_change: number }>(c.env.DB, "SELECT must_change FROM credentials WHERE user_id = ?", actor.id);
-  return c.json({ must_change_password: !!cred?.must_change, has_password: !!cred, actor, property: { id: p.id, name: p.name, gstin: p.gstin, timezone: p.timezone, today: todayIn(p.timezone), invoice_prefix: p.invoice_prefix, auto_approve_on_tariff: p.auto_approve_on_tariff === 1 }, capabilities: caps, unread_notifications: unread?.n ?? 0 });
+  return c.json({ must_change_password: !!cred?.must_change, has_password: !!cred, actor, property: { id: p.id, name: p.name, gstin: p.gstin, timezone: p.timezone, today: todayIn(p.timezone), invoice_prefix: p.invoice_prefix, auto_approve_on_tariff: p.auto_approve_on_tariff === 1, gst_threshold_paise: p.gst_threshold_paise, gst_rate_below_bp: p.gst_rate_below_bp, gst_rate_above_bp: p.gst_rate_above_bp }, capabilities: caps, unread_notifications: unread?.n ?? 0 });
 });
 
 r.get("/ref", async (c) => {

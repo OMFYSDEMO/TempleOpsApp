@@ -107,67 +107,194 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
   </>;
 }
 
+/* ---------- Reservations: the desk's most-used screen. Pick dates, see every room's state for those dates,
+   tap the rooms, the money adds itself up, save. The list below is filterable and opens into a detail
+   with the same room picker for amendments. ---------- */
+
+const nightsOf = (ci: string, co: string) => ci && co && ci < co ? Math.round((Date.parse(co) - Date.parse(ci)) / 86_400_000) : 0;
+const addDays = (iso: string, n: number) => new Date(Date.parse(iso) + n * 86_400_000).toISOString().slice(0, 10);
+const slabFor = (me: Me, tariff: number | null, rate: number) => !me.property.gstin ? 0 : (tariff ?? rate) <= me.property.gst_threshold_paise ? me.property.gst_rate_below_bp : me.property.gst_rate_above_bp;
+const CHANNEL_SHORT: Record<string, string> = { direct: "Direct", booking_com: "Booking.com", makemytrip: "MMT", goibibo: "Goibibo", agoda: "Agoda", cleartrip: "Cleartrip", expedia: "Expedia", yatra: "Yatra", swiftbook: "SwiftBook", referral: "Referral", agent: "Agent" };
+
+/** Who holds each room for a stay, from the availability endpoint. */
+function useHolders(checkIn: string, checkOut: string, ignoreBookingId?: string | null) {
+  const n = nightsOf(checkIn, checkOut);
+  const q = useLoad(() => n > 0 ? get(`/bookings/availability?from=${checkIn}&to=${addDays(checkOut, -1)}`) : Promise.resolve(null), [checkIn, checkOut]);
+  const holders: Record<string, { name: string; kind: string }> = {};
+  for (const t of q.data?.taken ?? []) { if (ignoreBookingId && t.booking_id === ignoreBookingId) continue; if (!holders[t.room_id]) holders[t.room_id] = { name: t.guest_name ?? (t.kind === "hold" ? "a quote on hold" : "another booking"), kind: t.kind }; }
+  return { holders, loading: n > 0 && !q.data && !q.error, nights: n };
+}
+
+/**
+ * Room picker: one tile per room showing its state for the chosen dates. Tap a free room to add it at tariff,
+ * change the rate in place, tap again to remove. Taken rooms say who has them and cannot be picked.
+ */
+function RoomPicker({ me, rooms, checkIn, checkOut, sel, onChange, tariffFor, holders, loading }: { me: Me; rooms: Ref["locations"]; checkIn: string; checkOut: string; sel: Record<string, string>; onChange: (s: Record<string, string>) => void; tariffFor: (roomId: string, night: string) => number | null; holders: Record<string, { name: string; kind: string }>; loading: boolean }) {
+  const n = nightsOf(checkIn, checkOut);
+  if (n === 0) return <div className="roomgrid">{rooms.map((r) => <div key={r.id} className="roomtile idle"><b>{r.name}</b><span className="sub">{r.code} · pick dates to see availability</span></div>)}</div>;
+  return <div className="roomgrid">{rooms.map((r) => {
+    const t = tariffFor(r.id, checkIn); const held = holders[r.id]; const on = (sel[r.id] ?? "") !== "";
+    const rate = on ? Math.round(Number(sel[r.id]) * 100) : 0; const slab = on ? slabFor(me, t, rate) : 0;
+    const cls = `roomtile ${on ? "on" : held ? "taken" : "free"}`;
+    const toggle = () => { if (held && !on) return; const next = { ...sel }; if (on) delete next[r.id]; else next[r.id] = t ? String(t / 100) : ""; onChange(next); };
+    return <div key={r.id} className={cls}>
+      <button type="button" className="tilehead" onClick={toggle} disabled={!!held && !on} aria-pressed={on}>
+        <span><b>{r.name}</b><span className="sub">{r.code}{t ? ` · tariff ${inr(t)}/night` : " · no tariff set"}</span></span>
+        <span className="state">{loading ? "…" : on ? "✓ in this booking" : held ? `${held.kind === "hold" ? "held" : "taken"} · ${held.name}` : "free"}</span>
+      </button>
+      {on && <div className="tilebody">
+        <label className="field"><span>Rate per night, ex-GST (₹)</span><input inputMode="decimal" value={sel[r.id]} onChange={(e: any) => onChange({ ...sel, [r.id]: e.currentTarget.value })} /></label>
+        <div className="sub">{n} night{n > 1 ? "s" : ""} × {inr(rate)} = <b>{inr(rate * n)}</b>{me.property.gstin ? ` · GST ${slab / 100}%` : ""}{t && rate < t ? " · below tariff" : t && rate > t ? " · above tariff" : ""}</div>
+        <div className="actions">{t && rate !== t && <Btn small onClick={() => onChange({ ...sel, [r.id]: String(t / 100) })}>Use tariff</Btn>}<Btn small onClick={toggle}>Remove</Btn></div>
+      </div>}
+    </div>;
+  })}</div>;
+}
+
+/** The money a stay adds up to, computed the way the server will. */
+function stayTotals(me: Me, sel: Record<string, string>, checkIn: string, checkOut: string, tariffFor: (roomId: string, night: string) => number | null) {
+  const n = nightsOf(checkIn, checkOut); let room = 0, gst = 0, below = false, noTariff = false;
+  for (const [id, v] of Object.entries(sel)) { if (v === "") continue; const rate = Math.round(Number(v) * 100); const t = tariffFor(id, checkIn); if (t === null) noTariff = true; else if (rate < t) below = true; const sub = rate * n; room += sub; gst += Math.round(sub * slabFor(me, t, rate) / 10000); }
+  return { nights: n, rooms: Object.values(sel).filter((v) => v !== "").length, room, gst, gross: room + gst, below, noTariff };
+}
+
+function SummaryBar({ t, me, isOta, label }: { t: ReturnType<typeof stayTotals>; me: Me; isOta: boolean; label?: string }) {
+  if (!t.rooms) return null;
+  const approval = isOta ? "OTA stay · approves itself" : t.below ? "below tariff · goes to the revenue desk" : t.noTariff ? "no tariff for these dates · goes to the revenue desk" : me.property.auto_approve_on_tariff ? "on tariff · approves itself" : "waits for approval";
+  return <div className="sumbar"><div><small>{label ?? "This stay"}</small><b>{t.rooms} room{t.rooms > 1 ? "s" : ""} · {t.nights} night{t.nights > 1 ? "s" : ""}</b></div><div><small>Room total ex-GST</small><b>{inr(t.room)}</b></div><div><small>GST</small><b>{inr(t.gst)}</b></div><div className="gross"><small>Gross</small><b>{inr(t.gross)}</b></div><div className="appr"><Status s={isOta || (!t.below && !t.noTariff && me.property.auto_approve_on_tariff) ? "auto" : "pending"} /> <span className="sub">{approval}</span></div></div>;
+}
+
 export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   const q = useLoad(() => get("/bookings"), []);
   const rooms = refs.locations.filter((l) => l.kind === "room");
-  const [f, setF] = useState<any>({ guest_name: "", guest_phone: "", check_in: "", check_out: "", adults: 2, channel_code: "direct", rooms: {} as Record<string, string> });
+  const today = me.property.today;
+  const [f, setF] = useState<any>({ guest_name: "", guest_phone: "", guest_email: "", notes: "", check_in: today, check_out: addDays(today, 1), adults: 2, children: 0, channel_code: "direct", rooms: {} as Record<string, string> });
   const [open, setOpen] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"upcoming" | "inhouse" | "past" | "cancelled" | "all">("upcoming");
+  const [search, setSearch] = useState("");
   const detail = useLoad(() => open ? get(`/bookings/${open}`) : Promise.resolve(null), [open]);
   const tariffFor = (roomId: string, night: string) => { let best: any = null; for (const c of refs.rate_cards) { if (c.room_id !== roomId) continue; if (c.from_date && night < c.from_date) continue; if (c.to_date && night > c.to_date) continue; if (!best || c.priority > best.priority) best = c; } return best?.rate_paise ?? null; };
+  const av = useHolders(f.check_in, f.check_out);
+  const totals = stayTotals(me, f.rooms, f.check_in, f.check_out, tariffFor);
+  const channel = refs.channels.find((c) => c.code === f.channel_code);
+  const isOta = !!channel && channel.collection_type !== "direct";
+  const canSave = totals.rooms > 0 && totals.nights > 0 && f.guest_name.trim().length > 1 && Object.values(f.rooms as Record<string, string>).every((v) => v === "" || Number(v) >= 0);
   const save = () => run(async () => {
-    const rs = Object.entries(f.rooms).filter(([, v]) => v !== "").map(([room_id, v]) => ({ room_id, nightly_rate_paise: Math.round(Number(v) * 100) }));
+    const rs = Object.entries(f.rooms as Record<string, string>).filter(([, v]) => v !== "").map(([room_id, v]) => ({ room_id, nightly_rate_paise: Math.round(Number(v) * 100) }));
     const r = await post("/bookings", { ...f, rooms: rs });
-    toast(r.booking.status === "approved" ? "Booking approved (on tariff)" : `Awaiting approval: ${r.booking.approval.reasons.join(", ")}`);
-    setF({ ...f, guest_name: "", guest_phone: "", rooms: {} }); await q.reload();
+    toast(r.booking.status === "approved" ? `Booked · ${inr(r.booking.grossPaise)} gross · approved` : `Booked · awaiting approval (${r.booking.approval.reasons.join(", ")})`);
+    setF({ ...f, guest_name: "", guest_phone: "", guest_email: "", notes: "", rooms: {} }); await q.reload(); setOpen(r.booking.id);
   });
+  const list: any[] = (q.data?.bookings ?? []).filter((b: any) => {
+    if (search && !`${b.guest_name} ${b.guest_phone ?? ""} ${b.external_ref ?? ""}`.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filter === "all") return true;
+    if (filter === "cancelled") return ["cancelled", "no_show"].includes(b.status);
+    if (filter === "inhouse") return b.status === "checked_in";
+    if (filter === "past") return b.status === "checked_out";
+    return ["provisional", "approved"].includes(b.status) && b.check_out >= today;
+  }).sort((a: any, b: any) => filter === "past" || filter === "cancelled" ? (a.check_in < b.check_in ? 1 : -1) : (a.check_in > b.check_in ? 1 : -1));
+  const counts = { upcoming: (q.data?.bookings ?? []).filter((b: any) => ["provisional", "approved"].includes(b.status) && b.check_out >= today).length, inhouse: (q.data?.bookings ?? []).filter((b: any) => b.status === "checked_in").length };
   return <>
-    <h2>Reservations <small>W2 · typed once; on-tariff auto-approves, exceptions go to the revenue desk</small></h2>
-    <Card title="New manual booking">
-      <div className="grid two"><Field label="Guest"><input value={f.guest_name} onChange={(e: any) => setF({ ...f, guest_name: e.currentTarget.value })} /></Field><Field label="Phone"><input inputMode="tel" value={f.guest_phone} onChange={(e: any) => setF({ ...f, guest_phone: e.currentTarget.value })} /></Field>
-      <Field label="Check-in"><input type="date" value={f.check_in} onChange={(e: any) => setF({ ...f, check_in: e.currentTarget.value })} /></Field><Field label="Check-out"><input type="date" value={f.check_out} onChange={(e: any) => setF({ ...f, check_out: e.currentTarget.value })} /></Field>
-      <Field label="Channel"><select value={f.channel_code} onChange={(e: any) => setF({ ...f, channel_code: e.currentTarget.value })}>{refs.channels.map((c) => <option value={c.code}>{c.name}</option>)}</select></Field><Field label="Adults"><input type="number" min="1" value={f.adults} onChange={(e: any) => setF({ ...f, adults: Number(e.currentTarget.value) })} /></Field></div>
-      <div className="sub">Rooms · nightly rate ex-GST (tariff prefilled when dates are set)</div>
-      <div className="grid">{rooms.map((r) => { const t = f.check_in ? tariffFor(r.id, f.check_in) : null; return <Field key={r.id} label={`${r.name}${t ? ` · tariff ${inr(t)}` : ""}`}><div className="actions"><input inputMode="decimal" placeholder="— not booked —" value={f.rooms[r.id] ?? ""} onChange={(e: any) => setF({ ...f, rooms: { ...f.rooms, [r.id]: e.currentTarget.value } })} />{t && <Btn small onClick={() => setF({ ...f, rooms: { ...f.rooms, [r.id]: String(t / 100) } })}>tariff</Btn>}</div></Field>; })}</div>
-      <div className="actions end"><Btn kind="primary" onClick={save}>Save booking</Btn></div></Card>
-    <Card title={me.actor.role === "sales" ? "My bookings" : "Bookings"}>{!q.data ? <Loading error={q.error} /> : q.data.bookings.length === 0 ? <Empty>No bookings yet.</Empty> : <table className="t"><thead><tr><th>Guest</th><th>Channel</th><th>Stay</th><th>Rooms</th><th className="num">Gross</th><th className="num">Paid</th><th>Status</th><th></th></tr></thead><tbody>{q.data.bookings.map((b: any) => <tr key={b.id}><td>{b.guest_name}</td><td>{b.channel_name}</td><td>{fmtDate(b.check_in)} → {fmtDate(b.check_out)}</td><td>{b.room_names}</td><td className="num">{inr(b.gross_paise)}</td><td className="num">{inr(b.paid_paise)}</td><td><Status s={b.status} />{b.rate_vs_tariff !== "on" && <> <Status s={b.rate_vs_tariff} /></>}</td><td className="actions">
-      <Btn small onClick={() => setOpen(open === b.id ? null : b.id)}>{open === b.id ? "Close" : "Open"}</Btn>
-      {b.status === "provisional" && (me.actor.role !== "sales" || b.created_by === me.actor.id) && <Btn small kind="danger" onClick={() => run(async () => { await del(`/bookings/${b.id}`); await q.reload(); }, "Deleted")}>Delete</Btn>}
-      {["provisional", "approved"].includes(b.status) && <Btn small kind="danger" onClick={() => { const reason = prompt("Cancellation reason"); if (reason) run(async () => { await post(`/bookings/${b.id}/cancel`, { reason }); await q.reload(); }, "Cancelled; inventory released"); }}>Cancel</Btn>}
-    </td></tr>)}</tbody></table>}</Card>
-    {open && detail.data && <Card title={`Booking ${open}`} sub={<>{detail.data.guest.name} · {detail.data.channel.name} · {detail.data.booking.approval_mode ?? ""}</>}>
-      {detail.data.rooms.map((r: any) => <Row key={r.id} label={`${r.room_name} · ${r.nights} night(s) @ ${inr(r.nightly_rate_paise)}${r.tariff_rate_paise ? ` (tariff ${inr(r.tariff_rate_paise)})` : ""} · GST ${r.gst_rate_bp / 100}%`} value={inr(r.room_total_paise + r.gst_paise)} />)}
-      <Row strong label="Gross" value={inr(detail.data.booking.gross_paise)} /><Row label="Paid" value={inr(detail.data.paid_paise)} /><Row strong label="Balance" value={inr(detail.data.balance_paise)} />
-      {detail.data.approvals.map((a: any) => <div className="muted" key={a.id}>Approval: <Status s={a.status} /> {a.note}</div>)}
-      {detail.data.booking.notes && <div className="sub" style={{ whiteSpace: "pre-line", marginTop: "6px" }}>{detail.data.booking.notes}</div>}
-      <details><summary>Audit trail ({detail.data.audit.length})</summary>{detail.data.audit.map((a: any) => <div className="muted" key={a.id}>{a.at} · {a.actor_email} · {a.action}{a.action === "booking.amend" && a.after_json ? ` · ${JSON.parse(a.after_json).remark ?? ""}` : ""}</div>)}</details>
-    </Card>}
-    {open && detail.data && ["provisional", "approved", "checked_in"].includes(detail.data.booking.status) && <Amend key={open} d={detail.data} rooms={rooms} refs={refs} tariffFor={tariffFor} onDone={async () => { await Promise.all([q.reload(), detail.reload()]); }} />}
+    <h2>Reservations <small>pick the dates, tap the rooms, the money adds itself up · on-tariff bookings approve themselves, exceptions go to the revenue desk</small></h2>
+    <Card title="New booking" sub="three steps: the stay, the rooms, the guest">
+      <div className="section"><div className="sectionhead"><b>1 · Stay</b><span className="sub">{totals.nights > 0 ? `${totals.nights} night${totals.nights > 1 ? "s" : ""} · ${fmtDate(f.check_in)} → ${fmtDate(f.check_out)}` : "check-out must be after check-in"}</span></div>
+        <div className="form-grid four">
+          <Field label="Check-in"><input type="date" value={f.check_in} onChange={(e: any) => { const ci = e.currentTarget.value; setF({ ...f, check_in: ci, check_out: f.check_out <= ci ? addDays(ci, 1) : f.check_out, rooms: {} }); }} /></Field>
+          <Field label="Check-out"><input type="date" min={addDays(f.check_in, 1)} value={f.check_out} onChange={(e: any) => setF({ ...f, check_out: e.currentTarget.value, rooms: {} })} /></Field>
+          <Field label="Adults"><input type="number" min="1" value={f.adults} onChange={(e: any) => setF({ ...f, adults: Number(e.currentTarget.value) })} /></Field>
+          <Field label="Children"><input type="number" min="0" value={f.children} onChange={(e: any) => setF({ ...f, children: Number(e.currentTarget.value) })} /></Field>
+        </div>
+        <div className="sub" style={{ marginBottom: "6px" }}>Channel</div>
+        <Chips value={f.channel_code} options={refs.channels.map((c) => ({ value: c.code, label: CHANNEL_SHORT[c.code] ?? c.name }))} onChange={(v) => setF({ ...f, channel_code: v })} />
+      </div>
+      <div className="section"><div className="sectionhead"><b>2 · Rooms</b><span className="sub">{totals.nights > 0 ? "tap a free room to add it at tariff; change the rate on the tile" : "set the dates first"}</span></div>
+        <RoomPicker me={me} rooms={rooms} checkIn={f.check_in} checkOut={f.check_out} sel={f.rooms} onChange={(rs) => setF({ ...f, rooms: rs })} tariffFor={tariffFor} holders={av.holders} loading={av.loading} />
+        <SummaryBar t={totals} me={me} isOta={isOta} />
+      </div>
+      <div className="section"><div className="sectionhead"><b>3 · Guest</b><span className="sub">name and phone are enough; the rest can follow</span></div>
+        <div className="form-grid four">
+          <Field label="Guest name"><input value={f.guest_name} onChange={(e: any) => setF({ ...f, guest_name: e.currentTarget.value })} placeholder="as on the ID" /></Field>
+          <Field label="Phone"><input inputMode="tel" value={f.guest_phone} onChange={(e: any) => setF({ ...f, guest_phone: e.currentTarget.value })} /></Field>
+          <Field label="Email"><input type="email" value={f.guest_email} onChange={(e: any) => setF({ ...f, guest_email: e.currentTarget.value })} /></Field>
+          <Field label="Notes"><input value={f.notes} onChange={(e: any) => setF({ ...f, notes: e.currentTarget.value })} placeholder="early check-in, anniversary…" /></Field>
+        </div>
+      </div>
+      <div className="actions end"><Btn kind="primary" disabled={!canSave} onClick={save}>{totals.rooms ? `Save booking · ${inr(totals.gross)} gross` : "Pick the rooms to save"}</Btn></div>
+    </Card>
+
+    <Card title={me.actor.role === "sales" ? "My bookings" : "Bookings"} actions={<input className="search" placeholder="Search guest, phone, reference" value={search} onChange={(e: any) => setSearch(e.currentTarget.value)} />}>
+      <Chips value={filter} options={[{ value: "upcoming", label: `Upcoming · ${counts.upcoming}` }, { value: "inhouse", label: `In house · ${counts.inhouse}` }, { value: "past", label: "Past" }, { value: "cancelled", label: "Cancelled" }, { value: "all", label: "All" }]} onChange={setFilter} />
+      {!q.data ? <Loading error={q.error} /> : list.length === 0 ? <Empty>{filter === "upcoming" ? "No upcoming stays." : "Nothing here."}</Empty> : <div className="table-wrap"><table className="t bookings"><thead><tr><th>Guest</th><th>Stay</th><th>Rooms</th><th>Channel</th><th className="num">Gross</th><th className="num">Balance</th><th>Status</th><th></th></tr></thead><tbody>{list.map((b: any) => <tr key={b.id} className={open === b.id ? "open" : ""} onClick={() => setOpen(open === b.id ? null : b.id)}>
+        <td><b>{b.guest_name}</b>{b.guest_phone && <small>{b.guest_phone}</small>}</td>
+        <td>{fmtDate(b.check_in)} → {fmtDate(b.check_out)}<small>{b.nights} night{b.nights > 1 ? "s" : ""}{b.external_ref ? ` · ref ${b.external_ref}` : ""}</small></td>
+        <td><span className="roomchips">{String(b.room_names ?? "").split(", ").filter(Boolean).map((n: string) => <i key={n}>{n}</i>)}</span></td>
+        <td>{CHANNEL_SHORT[b.channel_code] ?? b.channel_name}</td>
+        <td className="num">{inr(b.gross_paise)}</td>
+        <td className="num">{b.gross_paise - b.paid_paise > 0 ? <span style={{ color: "var(--amb)" }}>{inr(b.gross_paise - b.paid_paise)}</span> : <span className="muted">paid</span>}</td>
+        <td><Status s={b.status} />{b.rate_vs_tariff === "below" && <> <Status s="below" /></>}</td>
+        <td className="actions"><Btn small onClick={() => setOpen(open === b.id ? null : b.id)}>{open === b.id ? "Close" : "Open"}</Btn></td>
+      </tr>)}</tbody></table></div>}
+    </Card>
+
+    {open && detail.data && <BookingDetail me={me} refs={refs} d={detail.data} rooms={rooms} tariffFor={tariffFor} onChange={async () => { await Promise.all([q.reload(), detail.reload()]); }} onClose={() => setOpen(null)} />}
   </>;
 }
 
+/** One booking: who, when, which rooms, what is owed; cancel or delete per the rules; amend with the same room picker. */
+function BookingDetail({ me, refs, d, rooms, tariffFor, onChange, onClose }: { me: Me; refs: Ref; d: any; rooms: Ref["locations"]; tariffFor: (roomId: string, night: string) => number | null; onChange: () => Promise<void>; onClose: () => void }) {
+  const b = d.booking; const live = ["provisional", "approved", "checked_in"].includes(b.status);
+  const canDelete = b.status === "provisional" && (me.actor.role !== "sales" || b.created_by === me.actor.id) && d.paid_paise === 0;
+  return <Card title={<>{d.guest.name} <Status s={b.status} />{b.rate_vs_tariff === "below" && <> <Status s="below" /></>}</>} sub={<>{fmtDate(b.check_in)} → {fmtDate(b.check_out)} · {b.nights} night{b.nights > 1 ? "s" : ""} · {d.channel.name}{b.external_ref ? ` · ref ${b.external_ref}` : ""} · {b.adults} adult{b.adults > 1 ? "s" : ""}{b.children ? `, ${b.children} child${b.children > 1 ? "ren" : ""}` : ""}{d.guest.phone ? ` · ${d.guest.phone}` : ""}</>}
+    actions={<div className="actions"><Btn small onClick={onClose}>Close</Btn>{canDelete && <Btn small kind="danger" onClick={() => run(async () => { await del(`/bookings/${b.id}`); onClose(); await onChange(); }, "Deleted")}>Delete</Btn>}{["provisional", "approved"].includes(b.status) && <Btn small kind="danger" onClick={() => { const reason = prompt("Cancellation reason"); if (reason) run(async () => { await post(`/bookings/${b.id}/cancel`, { reason }); await onChange(); }, "Cancelled · rooms released"); }}>Cancel booking</Btn>}</div>}>
+    <div className="grid two">
+      <div>
+        {d.rooms.map((r: any) => <Row key={r.id} label={<><b>{r.room_name}</b> · {r.nights} night{r.nights > 1 ? "s" : ""} @ {inr(r.nightly_rate_paise)}</>} sub={`${r.tariff_rate_paise ? `tariff ${inr(r.tariff_rate_paise)} · ` : ""}GST ${r.gst_rate_bp / 100}%`} value={inr(r.room_total_paise + r.gst_paise)} />)}
+      </div>
+      <div>
+        <Row label="Gross" value={inr(b.gross_paise)} /><Row label="Paid" value={inr(d.paid_paise)} /><Row strong label="Balance" value={<span style={d.balance_paise > 0 ? { color: "var(--amb)" } : undefined}>{inr(d.balance_paise)}</span>} />
+        {d.invoices.map((i: any) => <Row key={i.id} label={`Invoice ${i.number}`} sub={fmtDate(i.issued_on)} value={<Status s={i.status} />} />)}
+        {d.approvals.filter((a: any) => a.status !== "auto").map((a: any) => <Row key={a.id} label={`${a.kind} approval`} sub={a.note} value={<Status s={a.status} />} />)}
+      </div>
+    </div>
+    {b.notes && <div className="sub" style={{ whiteSpace: "pre-line", marginTop: "6px" }}>{b.notes}</div>}
+    <details><summary>Audit trail ({d.audit.length})</summary>{d.audit.map((a: any) => <div className="muted" key={a.id}>{a.at} · {a.actor_email} · {a.action}{a.action === "booking.amend" && a.after_json ? ` · ${JSON.parse(a.after_json).remark ?? ""}` : ""}</div>)}</details>
+    {live && <Amend key={b.id} me={me} d={d} rooms={rooms} refs={refs} tariffFor={tariffFor} onDone={onChange} />}
+  </Card>;
+}
+
 /** Correct a booking in place: room exchange, dates, rates, guest, channel. A remark is required and lands in the audit trail. */
-function Amend({ d, rooms, refs, tariffFor, onDone }: { d: any; rooms: Ref["locations"]; refs: Ref; tariffFor: (roomId: string, night: string) => number | null; onDone: () => Promise<void> }) {
+function Amend({ me, d, rooms, refs, tariffFor, onDone }: { me: Me; d: any; rooms: Ref["locations"]; refs: Ref; tariffFor: (roomId: string, night: string) => number | null; onDone: () => Promise<void> }) {
   const cur: Record<string, string> = {}; for (const r of d.rooms) cur[r.room_id] = String(r.nightly_rate_paise / 100);
+  const [openA, setOpenA] = useState(false);
   const [a, setA] = useState<any>({ guest_name: d.guest.name, guest_phone: d.guest.phone ?? "", check_in: d.booking.check_in, check_out: d.booking.check_out, adults: d.booking.adults, children: d.booking.children, channel_code: d.channel.code, rooms: cur, remark: "" });
-  const chosen = Object.entries(a.rooms as Record<string, string>).filter(([, v]) => v !== "");
+  const av = useHolders(a.check_in, a.check_out, d.booking.id);
+  const totals = stayTotals(me, a.rooms, a.check_in, a.check_out, tariffFor);
+  const channel = refs.channels.find((c) => c.code === a.channel_code);
   const changed = a.guest_name !== d.guest.name || a.guest_phone !== (d.guest.phone ?? "") || a.check_in !== d.booking.check_in || a.check_out !== d.booking.check_out || a.adults !== d.booking.adults || a.children !== d.booking.children || a.channel_code !== d.channel.code || JSON.stringify(a.rooms) !== JSON.stringify(cur);
   const save = () => run(async () => {
-    const r = await post(`/bookings/${d.booking.id}/amend`, { ...a, rooms: chosen.map(([room_id, v]) => ({ room_id, nightly_rate_paise: Math.round(Number(v) * 100) })) });
+    const r = await post(`/bookings/${d.booking.id}/amend`, { ...a, rooms: Object.entries(a.rooms as Record<string, string>).filter(([, v]) => v !== "").map(([room_id, v]) => ({ room_id, nightly_rate_paise: Math.round(Number(v) * 100) })) });
     toast(r.booking.needsApproval ? `Amended · awaiting approval (${r.booking.approval.reasons.join(", ")})` : "Amended · audited · front desk notified");
-    await onDone();
+    setOpenA(false); await onDone();
   });
-  return <Card title="Amend this booking" sub="room exchange, dates, rate, guest or channel · say why in the remark; the change is audited and the front desk is told">
-    <div className="grid two">
-      <Field label="Guest"><input value={a.guest_name} onChange={(e: any) => setA({ ...a, guest_name: e.currentTarget.value })} /></Field><Field label="Phone"><input inputMode="tel" value={a.guest_phone} onChange={(e: any) => setA({ ...a, guest_phone: e.currentTarget.value })} /></Field>
-      <Field label="Check-in"><input type="date" value={a.check_in} onChange={(e: any) => setA({ ...a, check_in: e.currentTarget.value })} /></Field><Field label="Check-out"><input type="date" value={a.check_out} onChange={(e: any) => setA({ ...a, check_out: e.currentTarget.value })} /></Field>
-      <Field label="Channel"><select value={a.channel_code} onChange={(e: any) => setA({ ...a, channel_code: e.currentTarget.value })}>{refs.channels.map((c) => <option value={c.code}>{c.name}</option>)}</select></Field>
-      <div className="grid two"><Field label="Adults"><input type="number" min="1" value={a.adults} onChange={(e: any) => setA({ ...a, adults: Number(e.currentTarget.value) })} /></Field><Field label="Children"><input type="number" min="0" value={a.children} onChange={(e: any) => setA({ ...a, children: Number(e.currentTarget.value) })} /></Field></div>
+  if (!openA) return <div className="actions end" style={{ marginTop: "12px" }}><Btn onClick={() => setOpenA(true)}>Amend this booking</Btn></div>;
+  return <div className="amend">
+    <div className="sectionhead"><b>Amend</b><span className="sub">room exchange, dates, rate, guest or channel · say why in the remark; the change is audited and the front desk is told</span></div>
+    <div className="form-grid four">
+      <Field label="Check-in"><input type="date" value={a.check_in} onChange={(e: any) => setA({ ...a, check_in: e.currentTarget.value })} /></Field>
+      <Field label="Check-out"><input type="date" value={a.check_out} onChange={(e: any) => setA({ ...a, check_out: e.currentTarget.value })} /></Field>
+      <Field label="Adults"><input type="number" min="1" value={a.adults} onChange={(e: any) => setA({ ...a, adults: Number(e.currentTarget.value) })} /></Field>
+      <Field label="Children"><input type="number" min="0" value={a.children} onChange={(e: any) => setA({ ...a, children: Number(e.currentTarget.value) })} /></Field>
     </div>
-    <div className="sub">Rooms · nightly rate ex-GST · clear a box to release that room, fill one to move in</div>
-    <div className="grid">{rooms.map((r) => { const t = tariffFor(r.id, a.check_in); const on = (a.rooms[r.id] ?? "") !== ""; return <Field key={r.id} label={`${r.name}${t ? ` · tariff ${inr(t)}` : ""}${on ? " · in this booking" : ""}`}><div className="actions"><input inputMode="decimal" placeholder="— not in this booking —" value={a.rooms[r.id] ?? ""} onChange={(e: any) => setA({ ...a, rooms: { ...a.rooms, [r.id]: e.currentTarget.value } })} />{t && !on && <Btn small onClick={() => setA({ ...a, rooms: { ...a.rooms, [r.id]: String(t / 100) } })}>add at tariff</Btn>}{on && <Btn small onClick={() => setA({ ...a, rooms: { ...a.rooms, [r.id]: "" } })}>remove</Btn>}</div></Field>; })}</div>
-    <Field label="Remark (required)" hint="what was wrong and what changed, e.g. Cleartrip mapped the room type wrongly; moved to Superior"><input value={a.remark} onChange={(e: any) => setA({ ...a, remark: e.currentTarget.value })} /></Field>
-    <div className="actions end"><Btn kind="primary" disabled={!changed || a.remark.trim().length < 3 || chosen.length === 0} onClick={save}>Save amendment</Btn></div>
-  </Card>;
+    <RoomPicker me={me} rooms={rooms} checkIn={a.check_in} checkOut={a.check_out} sel={a.rooms} onChange={(rs) => setA({ ...a, rooms: rs })} tariffFor={tariffFor} holders={av.holders} loading={av.loading} />
+    <SummaryBar t={totals} me={me} isOta={!!channel && channel.collection_type !== "direct"} label="After the change" />
+    <div className="form-grid four">
+      <Field label="Guest"><input value={a.guest_name} onChange={(e: any) => setA({ ...a, guest_name: e.currentTarget.value })} /></Field>
+      <Field label="Phone"><input inputMode="tel" value={a.guest_phone} onChange={(e: any) => setA({ ...a, guest_phone: e.currentTarget.value })} /></Field>
+      <Field label="Channel"><select value={a.channel_code} onChange={(e: any) => setA({ ...a, channel_code: e.currentTarget.value })}>{refs.channels.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}</select></Field>
+      <Field label="Remark (required)" hint="what was wrong and what changed"><input value={a.remark} onChange={(e: any) => setA({ ...a, remark: e.currentTarget.value })} placeholder="e.g. Cleartrip mapped the room type wrongly; moved to Superior" /></Field>
+    </div>
+    <div className="actions end"><Btn onClick={() => setOpenA(false)}>Discard</Btn><Btn kind="primary" disabled={!changed || a.remark.trim().length < 3 || totals.rooms === 0} onClick={save}>Save amendment</Btn></div>
+  </div>;
 }
 
 export function Availability({ refs }: { me: Me; refs: Ref }) {

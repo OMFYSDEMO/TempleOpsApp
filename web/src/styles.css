@@ -111,6 +111,28 @@ table.t tbody tr:hover { background: #f3f8f0; }
 details summary { cursor: pointer; color: var(--ink); font-size: 12px; font-weight: 600; padding: 8px 0; }
 details summary:hover { color: var(--accent); }
 
+/* ---------- Reservations: sections, room tiles, summary strip ---------- */
+.section { padding: 14px 0; border-top: 1px solid var(--line); } .section:first-of-type { border-top: 0; padding-top: 4px; }
+.sectionhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; } .sectionhead b { font-size: 14px; font-weight: 650; }
+.form-grid.four { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.roomgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 4px 0 12px; }
+.roomtile { border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow: hidden; }
+.roomtile .tilehead { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left; background: none; border: 0; padding: 14px; font: inherit; color: var(--ink); cursor: pointer; }
+.roomtile .tilehead b { font-size: 14px; font-weight: 650; } .roomtile .tilehead .sub { display: block; }
+.roomtile .state { font-size: 11px; font-weight: 650; border-radius: 6px; padding: 3px 7px; align-self: flex-start; background: var(--line2); color: var(--muted); }
+.roomtile.free:hover { border-color: var(--accent); } .roomtile.free .state { background: var(--okbg); color: var(--ok); }
+.roomtile.on { border-color: var(--accent); background: #f6fbf0; } .roomtile.on .state { background: var(--soft); color: var(--ink); }
+.roomtile.taken { background: var(--paper); } .roomtile.taken .tilehead { cursor: not-allowed; color: var(--muted); } .roomtile.taken .state { background: var(--ambbg); color: var(--amb); }
+.roomtile.idle { padding: 14px; color: var(--muted); } .roomtile.idle b { color: var(--ink); display: block; font-size: 14px; }
+.roomtile .tilebody { padding: 0 14px 12px; border-top: 1px dashed var(--line); } .roomtile .tilebody .field { margin: 10px 0 6px; } .roomtile .tilebody .actions { margin-top: 8px; }
+.sumbar { display: flex; flex-wrap: wrap; gap: 18px 28px; align-items: flex-end; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 4px 0 6px; }
+.sumbar small { display: block; color: var(--muted); font-size: 11px; } .sumbar b { font-size: 15px; font-variant-numeric: tabular-nums; } .sumbar .gross b { font-size: 20px; letter-spacing: -.02em; } .sumbar .appr { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.card header .search { font: inherit; font-size: 13px; min-height: 38px; border: 1px solid var(--field-line); border-radius: 8px; padding: 8px 10px; min-width: 240px; background: var(--card); color: var(--ink); }
+.table-wrap { max-width: 100%; overflow: auto; margin-top: 10px; }
+table.bookings tbody tr { cursor: pointer; } table.bookings tbody tr.open { background: #f3f8f0; } table.bookings td small { display: block; color: var(--muted); font-size: 11px; }
+.roomchips { display: inline-flex; flex-wrap: wrap; gap: 4px; } .roomchips i { font-style: normal; font-size: 11px; font-weight: 650; background: var(--line2); color: var(--ink); border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
+.amend { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+
 /* ---------- Mobile: the sidebar slides in from the menu button, as in the kit ---------- */
 @media (max-width: 850px) {
   .topbar { padding: 0 14px; gap: 10px; } .topbar .where { display: none; } .topbar .mbrand span.txt { display: none; }
@@ -124,6 +146,7 @@ details summary:hover { color: var(--accent); }
   .hero { padding: 18px; } .hero .big { font-size: 34px; }
   .card { padding: 16px; } .kpi { gap: 12px; }
   .actions.end > .btn { flex: 1 1 140px; }
+  .roomgrid { grid-template-columns: 1fr; } .sumbar .appr { margin-left: 0; width: 100%; } .card header .search { min-width: 0; width: 100%; } .card header { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) { nav.side { transition: none; } }
 @media print { nav.side, .topbar, .menu-backdrop, .fab, .actions { display: none !important; } .content { margin: 0; padding: 0; } main { padding: 0; max-width: none; } .card { break-inside: avoid; } body { background: #fff; } }
