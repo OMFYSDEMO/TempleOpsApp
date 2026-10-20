@@ -5,6 +5,9 @@
 set -euo pipefail
 URL="$1"; TEAM="$2"
 echo "Testing $URL"
+# A custom domain created by this deploy can take a minute to resolve: wait for DNS before judging anything.
+host=$(echo "$URL" | sed -E 's#https?://([^/]+).*#\1#')
+for i in $(seq 1 24); do getent hosts "$host" >/dev/null 2>&1 && break; echo "waiting for DNS: $host"; sleep 5; done
 code=$(curl -sS --max-time 20 -o /tmp/body -w "%{http_code}" -D /tmp/hdr "$URL/api/health?deep=1")
 loc=$(grep -i '^location:' /tmp/hdr | tr -d '\r' | awk '{print $2}' || true)
 body=$(cat /tmp/body)
