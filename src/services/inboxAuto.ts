@@ -18,6 +18,10 @@ import { recordPayment } from "./payments";
  *  - Airpay payment   → successful, and the order id starts with a SwiftBook itinerary we hold → payment + fee
  *  - modification     → always a person: the email rarely says what changed
  */
+/** A booking reference matches as stored, or as the "STAAH id (OTA ref)" pair the migrated stays carry. */
+export const REF_MATCH = "(external_ref = ? OR external_ref LIKE ? OR external_ref LIKE ?)";
+export const refArgs = (ref: string) => [ref, `${ref} (%`, `% (${ref})`];
+
 export type AutoResult = { applied: true; what: "booked" | "cancelled" | "paid"; id: string } | { applied: false; note: string };
 
 /** Automation acts for the owner (FKs need a real user) but signs the audit as itself. */
@@ -91,7 +95,7 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
     }
     if (item.kind === "cancellation") {
       if (!item.external_ref) return { applied: false, note: "no booking reference in the email" };
-      const open = await all<{ id: string; status: string; guest_id: string }>(db, "SELECT id, status, guest_id FROM bookings WHERE property_id = ? AND external_ref = ? AND status NOT IN ('cancelled','no_show','checked_out')", property.id, item.external_ref);
+      const open = await all<{ id: string; status: string; guest_id: string }>(db, `SELECT id, status, guest_id FROM bookings WHERE property_id = ? AND ${REF_MATCH} AND status NOT IN ('cancelled','no_show','checked_out')`, property.id, ...refArgs(item.external_ref));
       if (open.length !== 1) return { applied: false, note: open.length ? "more than one open booking carries that reference" : `no open booking with reference ${item.external_ref}` };
       if (open[0].status === "checked_in") return { applied: false, note: "guest is checked in: a person decides" };
       const res = await cancelBooking(db, actor, property, open[0].id, "cancelled", `${item.source} cancellation email`);

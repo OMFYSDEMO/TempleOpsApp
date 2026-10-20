@@ -5,7 +5,7 @@ import { splitInclusive } from "../domain/money";
 import PostalMime from "postal-mime";
 import { parseInboundEmail, PARSER_VERSION, type ParsedEmail } from "../email/parsers";
 import { createBooking, gstPolicy } from "../services/bookings";
-import { autoApply } from "../services/inboxAuto";
+import { autoApply, REF_MATCH, refArgs } from "../services/inboxAuto";
 import { slabBpForRoomNight } from "../domain/gst";
 import type { Env } from "../env";
 
@@ -22,7 +22,7 @@ r.get("/", async (c) => {
 /** Status an email starts in: a known reservation is a duplicate; a payment routes to the Payments screen. */
 async function initialStatus(env: Env, propertyId: string, parsed: ParsedEmail): Promise<string> {
   if (parsed.external_ref && parsed.kind === "new_reservation") {
-    const dup = await one(env.DB, "SELECT id FROM bookings WHERE property_id = ? AND external_ref = ?", propertyId, parsed.external_ref);
+    const dup = await one(env.DB, `SELECT id FROM bookings WHERE property_id = ? AND ${REF_MATCH}`, propertyId, ...refArgs(parsed.external_ref));
     if (dup) return "duplicate";
   }
   return parsed.kind === "payment" ? "routed" : "pending";
@@ -143,7 +143,7 @@ r.post("/:id/approve", async (c) => {
   }
   if (item.kind === "cancellation") {
     if (!item.external_ref) throw new HttpError(400, "cancellation email has no reference; dismiss and cancel the booking manually");
-    const bk: any = await one(c.env.DB, "SELECT id FROM bookings WHERE property_id = ? AND external_ref = ? AND status NOT IN ('cancelled','no_show','checked_out')", p.id, item.external_ref);
+    const bk: any = await one(c.env.DB, `SELECT id FROM bookings WHERE property_id = ? AND ${REF_MATCH} AND status NOT IN ('cancelled','no_show','checked_out')`, p.id, ...refArgs(item.external_ref));
     if (!bk) throw new HttpError(404, `no open booking with reference ${item.external_ref}`);
     const { cancelBooking } = await import("../services/bookings");
     const res = await cancelBooking(c.env.DB, actor, p, bk.id, "cancelled", `OTA cancellation (${item.source})`);
