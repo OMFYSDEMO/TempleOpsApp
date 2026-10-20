@@ -39,6 +39,24 @@ describe("Inbox automation", () => {
     expect(appr.booking.status).toBe("approved");
   });
 
+  it("a waiting card shows every room with who holds it, preselects the free ones, and a second copy of the email is a duplicate", async () => {
+    const list = await ok("prachi", "GET", "/api/inbox?status=pending");
+    const clash = list.items.find((i: any) => i.external_ref === "7000000000000003");
+    expect(clash.room_options.map((o: any) => [o.name, o.free])).toEqual([["Deluxe", true], ["Premium", false], ["Superior", true], ["Executive", true]]);
+    expect(clash.room_options[1].taken_by).toBe("Meera Nair");
+    expect(clash.suggested_room_ids).toEqual([]);
+    expect(clash.nightly_rate_paise).toBe(700000);
+    const again = await ok("prachi", "POST", "/api/inbox/ingest", { ...staah("7000000000000003"), message_id: "<copy@staah>" });
+    expect(again.status).toBe("duplicate");
+    // A person books it into a free room of another type with one call; sales then see it in Reservations.
+    const appr = await ok("prachi", "POST", `/api/inbox/${clash.id}/approve`, { room_ids: ["loc_r3"] });
+    expect(appr.booking.status).toBe("approved");
+    const mine = await ok("prachi", "GET", "/api/bookings");
+    expect(mine.bookings.find((b: any) => b.id === appr.booking.id)).toBeTruthy();
+    const first = (await ok("prachi", "GET", "/api/inbox?status=approved")).items.find((i: any) => i.external_ref === "7000000000000002");
+    expect(mine.bookings.find((b: any) => b.id === first.booking_id)).toBeTruthy(); // auto-booked by the system, still on the sales list
+  });
+
   it("books a SwiftBook direct stay and records the Airpay payment for it, once", async () => {
     const sb = await ok("prachi", "POST", "/api/inbox/ingest", { from: "bookings@swiftbook.io", subject: "SwiftBook · New booking confirmed", text: "Guest: Rashmi Shah\nItinerary No: 10609000001012\n1 room · 2 nights\nRoom: Deluxe ×1\nCheck-in: 2026-12-26\nCheck-out: 2026-12-28\nTotal: ₹14,700.00\nPaid online" });
     expect(sb.status).toBe("approved"); expect(sb.auto.what).toBe("booked");

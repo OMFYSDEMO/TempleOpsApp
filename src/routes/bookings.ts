@@ -26,7 +26,8 @@ r.get("/", requireCap("bookings_read"), async (c) => {
   if (from) { where.push("b.check_out >= ?"); params.push(date(from, "from")); }
   if (to) { where.push("b.check_in <= ?"); params.push(date(to, "to")); }
   if (status) { where.push("b.status = ?"); params.push(status); }
-  if (mine || actor.role === "sales") { where.push("(b.created_by = ? OR b.salesperson_id = ?)"); params.push(actor.id, actor.id); }
+  // Sales see their own bookings and every booking that came in through the inbox (OTA and website engine stays).
+  if (mine || actor.role === "sales") { where.push("(b.created_by = ? OR b.salesperson_id = ? OR b.inbox_item_id IS NOT NULL)"); params.push(actor.id, actor.id); }
   const rows = await all(c.env.DB,
     `SELECT b.*, g.name AS guest_name, g.phone AS guest_phone, ch.code AS channel_code, ch.name AS channel_name, ch.collection_type,
             (SELECT GROUP_CONCAT(l.name, ', ') FROM booking_rooms br JOIN locations l ON l.id = br.room_id WHERE br.booking_id = b.id) AS room_names,

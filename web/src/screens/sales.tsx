@@ -53,35 +53,57 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
   const [pick, setPick] = useState<Record<string, string[]>>({});
   const [rate, setRate] = useState<Record<string, string>>({});
   const [paste, setPaste] = useState({ from: "", subject: "", text: "" });
-  const rooms = refs.locations.filter((l) => l.kind === "room");
+  // Rooms automation would have chosen are preselected; a person only taps when the choice is not obvious.
+  const chosen = (it: any): string[] => pick[it.id] ?? it.suggested_room_ids ?? [];
+  const book = (it: any) => run(async () => {
+    const rooms = chosen(it);
+    const r = await post(`/inbox/${it.id}/approve`, { room_ids: rooms, ...(rate[it.id] ? { nightly_rate_paise: Math.round(Number(rate[it.id]) * 100) } : {}) });
+    await q.reload();
+    toast(it.kind === "cancellation" ? "Booking cancelled · rooms released" : r.booking?.status === "approved" ? "Booked · it is in Reservations" : `Booked · awaiting approval (${(r.booking?.approval?.reasons ?? []).join(", ")})`);
+  });
   return <>
-    <h2>Inbox — bookings <small>STAAH and SwiftBook emails book, cancel and record themselves when the facts line up; the rest wait here with the reason</small></h2>
+    <h2>Inbox — bookings <small>STAAH, SwiftBook and Airpay emails book, cancel and record themselves when the facts line up; the rest wait here for one tap</small></h2>
     <Chips value={status} options={[{ value: "pending", label: "Needs a person" }, { value: "approved", label: "Done · auto and approved" }, { value: "duplicate", label: "Already in the books" }, { value: "dismissed", label: "Dismissed" }]} onChange={setStatus} />
     {!q.data ? <Loading error={q.error} /> : q.data.items.length === 0 ? <Empty>Nothing to review.</Empty> : q.data.items.map((it: any) => {
-      const d = it.parsed ?? {}; const sel = pick[it.id] ?? [];
-      return <Card key={it.id} title={<>{it.source} · {it.kind.replace("_", " ")} <Status s={it.auto_applied ? "auto" : it.status} />{d.confidence === "low" && <Status s="check parse" />}</>} sub={<>From {it.from_addr} · {it.subject}</>} tone={it.status === "pending" && it.auto_note ? "amb" : undefined}>
-        {it.status === "pending" && it.auto_note && <div class="sub" style="margin-bottom:8px"><b>Why it waited:</b> {it.auto_note}</div>}
-        {it.auto_applied === 1 && <div class="sub" style="margin-bottom:8px">Applied automatically on arrival{it.reviewed_at ? ` · ${fmtDate(it.reviewed_at.slice(0, 10))}` : ""}</div>}
-        <div class="grid two"><div>
-          <Row label="Guest" value={d.guest_name ?? "—"} /><Row label="Dates" value={d.check_in ? `${fmtDate(d.check_in)} → ${fmtDate(d.check_out)}` : "—"} />
-          {d.channel && <Row label="Channel" value={d.channel} />}{d.room_name && <Row label="Room" value={`${d.room_name} × ${d.rooms ?? 1}`} />}
-          {d.room_total_paise != null && <Row label={`Room total${d.room_total_is_ex_gst ? " (ex-GST)" : ""}`} value={inr(d.room_total_paise)} />}{d.total_incl_gst_paise != null && <Row label="Total incl. GST" value={inr(d.total_incl_gst_paise)} />}
-          {d.commission_bp != null && <Row label="Commission" value={`${d.commission_bp / 100}%`} />}{d.collection_type && <Row label="Collection" value={d.collection_type.replace("_", " ")} />}{it.external_ref && <Row label="Ref" value={<span class="mono">{it.external_ref}</span>} />}
-          {d.order_id && <Row label="Order" value={<span class="mono">{d.order_id}</span>} />}{d.amount_paise != null && <Row label="Amount" value={inr(d.amount_paise)} />}
+      const d = it.parsed ?? {}; const sel = chosen(it); const opts: any[] = it.room_options ?? [];
+      const selNames = opts.filter((o) => sel.includes(o.id)).map((o) => o.name).join(" + ");
+      const nights = d.check_in && d.check_out ? Math.max(1, Math.round((Date.parse(d.check_out) - Date.parse(d.check_in)) / 86_400_000)) : null;
+      const ratePaise = rate[it.id] ? Math.round(Number(rate[it.id]) * 100) : it.nightly_rate_paise;
+      return <Card key={it.id} title={<>{d.guest_name ?? it.subject} <span class="muted">· {d.channel ?? it.source}</span> <Status s={it.auto_applied ? "auto" : it.status} />{d.confidence === "low" && <Status s="check parse" />}</>}
+        sub={<>{d.check_in ? `${fmtDate(d.check_in)} → ${fmtDate(d.check_out)}${nights ? ` · ${nights} night${nights > 1 ? "s" : ""}` : ""}` : it.subject}{d.room_name ? ` · ${d.rooms ?? 1} × ${d.room_name}` : ""}{d.adults ? ` · ${d.adults} adult${d.adults > 1 ? "s" : ""}${d.children ? `, ${d.children} child${d.children > 1 ? "ren" : ""}` : ""}` : ""}{it.external_ref ? <> · ref <span class="mono">{it.external_ref}</span></> : ""}</>}
+        tone={it.status === "pending" && it.auto_note ? "amb" : undefined}>
+        {it.status === "pending" && it.auto_note && <div class="sub" style="margin-bottom:8px"><b>Waiting because:</b> {it.auto_note}</div>}
+        {it.auto_applied === 1 && <div class="sub" style="margin-bottom:8px">Applied automatically on arrival</div>}
+        <div class="grid two">
+          <div>
+            {d.room_total_paise != null && <Row label={`Room total${d.room_total_is_ex_gst ? " (ex-GST)" : ""}`} value={inr(d.room_total_paise)} />}
+            {d.total_incl_gst_paise != null && <Row label="Total incl. GST" value={inr(d.total_incl_gst_paise)} />}
+            {d.commission_paise != null && <Row label="OTA commission" value={inr(d.commission_paise)} />}{d.commission_bp != null && <Row label="Commission" value={`${d.commission_bp / 100}%`} />}
+            {d.collection_type && <Row label="Collection" value={d.collection_type.replace("_", " ")} />}
+            {d.order_id && <Row label="Order" value={<span class="mono">{d.order_id}</span>} />}{d.amount_paise != null && <Row label="Amount" value={inr(d.amount_paise)} />}
+            {it.status !== "pending" && <div class="sub">From {it.from_addr} · {it.subject}</div>}
+          </div>
+          {it.status === "pending" && it.kind === "new_reservation" && opts.length > 0 && <div>
+            <div class="sub">Room for this stay · tap to change</div>
+            <div class="chips">{opts.map((o) => <button type="button" key={o.id} class={`chip ${sel.includes(o.id) ? "on" : ""} ${o.free ? "" : "bad"}`} disabled={!o.free} title={o.free ? "free for these dates" : `taken by ${o.taken_by}`} onClick={() => setPick({ ...pick, [it.id]: sel.includes(o.id) ? sel.filter((x) => x !== o.id) : [...sel, o.id] })}>{o.name}{o.free ? "" : ` · ${o.taken_by}`}</button>)}</div>
+            {opts.every((o) => !o.free) && <div class="sub" style="color:var(--bad)">Every room is taken for these dates. Free one up (cancel or move the booking holding it in Reservations), then come back and book.</div>}
+            <Field label="Nightly rate ex-GST (₹)" hint={it.nightly_rate_paise ? `from the email: ${inr(it.nightly_rate_paise)}` : "the email carried no amount"}><input inputMode="decimal" value={rate[it.id] ?? (it.nightly_rate_paise ? String(it.nightly_rate_paise / 100) : "")} onInput={(e: any) => setRate({ ...rate, [it.id]: e.currentTarget.value })} /></Field>
+          </div>}
         </div>
-        {it.status === "pending" && it.kind === "new_reservation" && <div><div class="sub">Room(s) this reservation occupies</div><div class="chips">{rooms.map((r) => <button type="button" key={r.id} class={`chip ${sel.includes(r.id) ? "on" : ""}`} onClick={() => setPick({ ...pick, [it.id]: sel.includes(r.id) ? sel.filter((x) => x !== r.id) : [...sel, r.id] })}>{r.name}</button>)}</div>
-          <Field label="Nightly rate ex-GST (₹) — leave blank to take it from the email"><input inputMode="decimal" value={rate[it.id] ?? ""} onInput={(e: any) => setRate({ ...rate, [it.id]: e.currentTarget.value })} /></Field></div>}
-        </div>
-        {it.status === "pending" && <div class="actions end"><Btn kind="danger" onClick={() => run(async () => { await post(`/inbox/${it.id}/dismiss`, { reason: "manual" }); await q.reload(); }, "Dismissed")}>Dismiss</Btn>
+        {it.status === "pending" && <div class="actions end">
+          <Btn kind="danger" onClick={() => run(async () => { await post(`/inbox/${it.id}/dismiss`, { reason: "manual" }); await q.reload(); }, "Dismissed")}>Dismiss</Btn>
           <Btn onClick={() => run(async () => { const r = await post(`/inbox/${it.id}/reparse`); await q.reload(); toast(r.auto?.applied ? `Applied automatically: ${r.auto.what}` : r.auto?.note ? `Read again · still waiting: ${r.auto.note}` : `Read again · ${r.status}`); })}>Re-read</Btn>
-          {(it.kind === "new_reservation" || it.kind === "cancellation") && <Btn kind="primary" disabled={it.kind === "new_reservation" && sel.length === 0} onClick={() => run(async () => { await post(`/inbox/${it.id}/approve`, { room_ids: sel, ...(rate[it.id] ? { nightly_rate_paise: Math.round(Number(rate[it.id]) * 100) } : {}) }); await q.reload(); }, it.kind === "cancellation" ? "Booking cancelled" : "Posted to the books · audited")}>Approve</Btn>}</div>}
-        {it.booking_id && <div class="muted">Booking {it.booking_id}</div>}
+          {it.kind === "new_reservation" && <Btn kind="primary" disabled={sel.length === 0 || !ratePaise} onClick={() => book(it)}>{sel.length ? `Book ${selNames}${ratePaise ? ` @ ${inr(ratePaise)}/night` : ""}` : "Pick a room to book"}</Btn>}
+          {it.kind === "cancellation" && <Btn kind="primary" onClick={() => book(it)}>Cancel the booking</Btn>}
+        </div>}
+        {it.booking_id && <div class="muted">Booking {it.booking_id}{it.booking_status ? ` · ${it.booking_status.replace("_", " ")}` : ""} · see Reservations</div>}
       </Card>;
     })}
     <Card title="Paste an email" sub="forwarded mail arrives on its own once Email Routing is on; paste one here to test, or when a notification went astray — same parser, same automation, same audit">
       <div class="grid two"><Field label="From"><input value={paste.from} onInput={(e: any) => setPaste({ ...paste, from: e.currentTarget.value })} placeholder="noreply@staah.com" /></Field><Field label="Subject"><input value={paste.subject} onInput={(e: any) => setPaste({ ...paste, subject: e.currentTarget.value })} /></Field></div>
       <Field label="Body (text)"><textarea rows={6} value={paste.text} onInput={(e: any) => setPaste({ ...paste, text: e.currentTarget.value })} /></Field>
       <div class="actions end"><Btn kind="primary" onClick={() => run(async () => { await post("/inbox/ingest", paste); setPaste({ from: "", subject: "", text: "" }); setStatus("pending"); await q.reload(); }, "Ingested")}>Ingest</Btn></div></Card>
+    <span hidden>{refs.locations.length}</span>
   </>;
 }
 

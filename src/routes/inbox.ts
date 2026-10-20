@@ -4,7 +4,7 @@ import { nowIso } from "../domain/dates";
 import { splitInclusive } from "../domain/money";
 import PostalMime from "postal-mime";
 import { parseInboundEmail, PARSER_VERSION, type ParsedEmail } from "../email/parsers";
-import { createBooking, gstPolicy } from "../services/bookings";
+import { createBooking, gstPolicy, conflicts } from "../services/bookings";
 import { autoApply, REF_MATCH, refArgs } from "../services/inboxAuto";
 import { slabBpForRoomNight } from "../domain/gst";
 import type { Env } from "../env";
@@ -12,18 +12,59 @@ import type { Env } from "../env";
 const r = newRouter();
 r.use("*", requireCap("inbox"));
 
+/** Nightly rate ex-GST implied by the email, the same way Approve derives it. */
+function impliedNightly(p: any, d: Record<string, any>, roomsN: number): number | null {
+  if (!d.check_in || !d.check_out) return null;
+  const nights = Math.max(1, Math.round((Date.parse(d.check_out) - Date.parse(d.check_in)) / 86_400_000));
+  if (d.nightly_rate_paise) return Number(d.nightly_rate_paise);
+  if (d.room_total_paise) return Math.round(Number(d.room_total_paise) / (nights * roomsN));
+  if (d.total_incl_gst_paise) { const perNight = Math.round(Number(d.total_incl_gst_paise) / (nights * roomsN)); return splitInclusive(perNight, slabBpForRoomNight(gstPolicy(p), perNight)).ex; }
+  return null;
+}
+
+/**
+ * Waiting cards carry everything a person needs to decide in one tap: every room with whether it is free for the
+ * stay (and who holds it when not), the rooms automation would have picked, and the nightly rate the email implies.
+ */
 r.get("/", async (c) => {
   const p = c.get("property");
   const status = c.req.query("status") ?? "pending";
-  const rows = await all(c.env.DB, "SELECT * FROM inbox_items WHERE property_id = ? AND status = ? ORDER BY received_at DESC LIMIT 100", p.id, status);
-  return c.json({ items: rows.map((x: any) => ({ ...x, parsed: x.parsed_json ? JSON.parse(x.parsed_json) : null })) });
+  const rows = await all(c.env.DB, "SELECT i.*, b.status AS booking_status FROM inbox_items i LEFT JOIN bookings b ON b.id = i.booking_id WHERE i.property_id = ? AND i.status = ? ORDER BY i.received_at DESC LIMIT 100", p.id, status);
+  const rooms = await all<{ id: string; name: string; code: string }>(c.env.DB, "SELECT id, name, code FROM locations WHERE property_id = ? AND kind = 'room' AND active = 1 ORDER BY sort, code", p.id);
+  const items = [];
+  for (const x of rows as any[]) {
+    const d = x.parsed_json ? JSON.parse(x.parsed_json) : null;
+    let room_options: unknown[] | null = null, suggested_room_ids: string[] = [], nightly_rate_paise: number | null = null;
+    if (x.status === "pending" && x.kind === "new_reservation" && d?.check_in && d?.check_out && d.check_in < d.check_out) {
+      const taken = await conflicts(c.env.DB, p.id, rooms.map((r) => r.id), d.check_in, d.check_out);
+      const holders: Record<string, string> = {};
+      for (const t of taken) {
+        if (holders[t.room_id]) continue;
+        const who: any = t.booking_id ? await one(c.env.DB, "SELECT g.name, b.status FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.id = ?", t.booking_id)
+          : t.lead_id ? await one(c.env.DB, "SELECT g.name, 'hold' AS status FROM leads l JOIN guests g ON g.id = l.guest_id WHERE l.id = ?", t.lead_id) : null;
+        holders[t.room_id] = who ? `${who.name}${who.status === "provisional" ? " (awaiting approval)" : who.status === "hold" ? " (on hold)" : ""}` : "another booking";
+      }
+      const want = String(d.room_name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const ofType = (r: { name: string }) => { const n = r.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); return !!want && (n === want || want.startsWith(n) || n.startsWith(want)); };
+      room_options = rooms.map((r) => ({ id: r.id, name: r.name, free: !holders[r.id], taken_by: holders[r.id] ?? null, matches_type: ofType(r) }));
+      const wanted = Math.max(1, Number(d.rooms ?? 1));
+      suggested_room_ids = rooms.filter((r) => ofType(r) && !holders[r.id]).slice(0, wanted).map((r) => r.id);
+      nightly_rate_paise = impliedNightly(p, d, wanted);
+    }
+    items.push({ ...x, parsed: d, room_options, suggested_room_ids, nightly_rate_paise });
+  }
+  return c.json({ items, rooms });
 });
 
 /** Status an email starts in: a known reservation is a duplicate; a payment routes to the Payments screen. */
-async function initialStatus(env: Env, propertyId: string, parsed: ParsedEmail): Promise<string> {
+async function initialStatus(env: Env, propertyId: string, parsed: ParsedEmail, self?: { id: string; received_at: string }): Promise<string> {
   if (parsed.external_ref && parsed.kind === "new_reservation") {
     const dup = await one(env.DB, `SELECT id FROM bookings WHERE property_id = ? AND ${REF_MATCH}`, propertyId, ...refArgs(parsed.external_ref));
     if (dup) return "duplicate";
+    // The same notification forwarded twice: the earlier card stands, the later one is a duplicate of it.
+    const earlier = await one(env.DB, "SELECT id FROM inbox_items WHERE property_id = ? AND kind = 'new_reservation' AND external_ref = ? AND status IN ('pending','approved') AND id != ? AND received_at <= ?",
+      propertyId, parsed.external_ref, self?.id ?? "", self?.received_at ?? "9999");
+    if (earlier) return "duplicate";
   }
   return parsed.kind === "payment" ? "routed" : "pending";
 }
@@ -72,7 +113,7 @@ export async function reparseItem(env: Env, propertyId: string, itemId: string, 
   else if (obj) { const j = JSON.parse(await obj.text()); from = j.from ?? from; subject = j.subject ?? subject; text = j.text ?? undefined; html = j.html ?? undefined; }
   else { const d = JSON.parse(item.parsed_json ?? "{}"); text = d.preview ?? ""; }
   const parsed = parseInboundEmail(from, subject, html, text);
-  const status = await initialStatus(env, propertyId, parsed);
+  const status = await initialStatus(env, propertyId, parsed, { id: item.id, received_at: item.received_at });
   const b = new Batch(env.DB, null);
   b.add("UPDATE inbox_items SET source = ?, kind = ?, parsed_json = ?, parser_version = ?, external_ref = ?, status = ?, auto_note = NULL WHERE id = ?",
     parsed.source, parsed.kind, JSON.stringify({ ...parsed.data, confidence: parsed.confidence }), PARSER_VERSION, parsed.external_ref, status, item.id);
@@ -117,7 +158,7 @@ r.post("/:id/approve", async (c) => {
   if (item.kind === "new_reservation") {
     const channelCode = str(x.channel_code ?? (item.source === "swiftbook" ? "swiftbook" : d.channel ? String(d.channel).toLowerCase().replace(/[^a-z]+/g, "_") : ""), "channel_code");
     const roomIds: string[] = Array.isArray(x.room_ids) ? x.room_ids.map(String) : [];
-    if (!roomIds.length) throw new HttpError(400, "room_ids: pick the room(s) this reservation occupies");
+    if (!roomIds.length) throw new HttpError(400, "pick the room(s) this reservation occupies");
     const checkIn = date(d.check_in, "check_in"), checkOut = date(d.check_out, "check_out");
     // Rate per room-night ex-GST. OTA totals usually arrive ex-GST; SwiftBook arrives inclusive, so split it.
     const nights = Math.max(1, Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86_400_000));

@@ -1,7 +1,7 @@
 import { rupeesToPaise } from "../domain/money";
 import { parseLooseDate } from "../domain/dates";
 
-export const PARSER_VERSION = "2026-10-3";
+export const PARSER_VERSION = "2026-10-4";
 
 export interface ParsedEmail {
   source: "staah" | "swiftbook" | "airpay" | "unknown";
