@@ -44,7 +44,9 @@ export function App() {
   const [notifOpen, setNotifOpen] = useState(false); const [notifs, setNotifs] = useState<any[]>([]);
   const [queued, setQueued] = useState(readQueue().length);
   const [changePw, setChangePw] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const hash = useHash();
+  useEffect(() => { setNavOpen(false); }, [hash]);
   const load = async () => {
     try { const [m, r] = await Promise.all([get<Me>("/me"), get<Ref>("/ref")]); setMe(m); setRef(r); setErr(null); setSignedOut(false); }
     catch (e: any) { setMe(null); if (e?.status === 401) setSignedOut(true); else setErr(e?.message ?? String(e)); }
@@ -68,30 +70,31 @@ export function App() {
   const initials = me.actor.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const roleNote = LOCK[me.actor.role];
   return <>
+    <div className="topbar">
+      <button type="button" className="btn menu-toggle" aria-controls="avos-navigation" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}>☰ Menu</button>
+      <a className="mbrand" href="#"><span className="mark">A</span><span className="txt">AVOS</span></a>
+      <div className="where"><Icon name="house" size={16} /><b>{me.property.name}</b><span>· {fmtDate(me.property.today)}</span></div>
+      <div className="spacer" />
+      {queued > 0 && <span className="queue">{queued} pending sync</span>}
+      <button className="iconbtn" onClick={openNotifs} title="Notifications"><Icon name="bell" />{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
+      <details className="usermenu"><summary><span className="avatar">{initials}</span><span>{me.actor.name}</span><span className="role">· {me.actor.role}</span><Icon name="chevron" size={14} /></summary><div>
+        <div className="sub">{me.actor.email}</div>
+        {me.actor.via !== "access" && <button onClick={() => setChangePw(true)}><Icon name="lock" size={16} />Change password</button>}
+        <button onClick={signOut}><Icon name="logout" size={16} />Sign out</button>
+        {devUser() && appEnv !== "production" && <div className="sub"><label>Dev user <select value={devUser() ?? ""} onChange={(e: any) => { setDevUser(e.currentTarget.value); location.hash = ""; load(); }}>{DEV_USERS.map((u) => <option value={u}>{u.split("@")[0]}</option>)}</select></label></div>}
+      </div></details>
+    </div>
     <div className="shell">
-      <nav className="side">
-        <a className="brand" href="#"><span className="mark">A</span><span><b>AVOS</b><small>{me.property.name}</small></span></a>
+      <nav className={`side ${navOpen ? "is-open" : ""}`} id="avos-navigation" aria-label="AVOS navigation">
+        <a className="brand" href="#"><span className="mark">A</span><span><b>AVOS</b><small>{me.property.name}</small></span><button type="button" className="btn menu-close" aria-label="Close navigation" onClick={() => setNavOpen(false)}>×</button></a>
         {groups.map((g) => <div key={g}><div className="grp">{g}</div>{visible.filter((s) => s.group === g).map((s) => <a key={s.key} href={`#${s.key}`} className={`item ${s.key === current.key ? "on" : ""}`}><Icon name={s.icon} />{s.label}</a>)}</div>)}
         <div className="foot"><b>{me.actor.role.charAt(0).toUpperCase() + me.actor.role.slice(1)} access</b>{roleNote}</div>
       </nav>
+      {navOpen && <button type="button" className="menu-backdrop" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
       <div className="content">
-        <div className="topbar">
-          <a className="mbrand" href="#"><span className="mark">A</span>AVOS</a>
-          <div className="where"><Icon name="house" size={16} /><b>{me.property.name}</b><span>· {fmtDate(me.property.today)}</span></div>
-          <div className="spacer" />
-          {queued > 0 && <span className="queue">{queued} pending sync</span>}
-          <button className="iconbtn" onClick={openNotifs} title="Notifications"><Icon name="bell" />{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
-          <details className="usermenu"><summary><span className="avatar">{initials}</span><span>{me.actor.name}</span><span className="role">· {me.actor.role}</span><Icon name="chevron" size={14} /></summary><div>
-            <div className="sub">{me.actor.email}</div>
-            {me.actor.via !== "access" && <button onClick={() => setChangePw(true)}><Icon name="lock" size={16} />Change password</button>}
-            <button onClick={signOut}><Icon name="logout" size={16} />Sign out</button>
-            {devUser() && appEnv !== "production" && <div className="sub"><label>Dev user <select value={devUser() ?? ""} onChange={(e: any) => { setDevUser(e.currentTarget.value); location.hash = ""; load(); }}>{DEV_USERS.map((u) => <option value={u}>{u.split("@")[0]}</option>)}</select></label></div>}
-          </div></details>
-        </div>
-        <main><Comp me={me} refs={ref} /></main>
+        <main id="content"><Comp me={me} refs={ref} /></main>
       </div>
     </div>
-    <nav className="mobile-nav">{visible.filter((s) => s.mobile).slice(0, 5).map((s) => <a key={s.key} href={`#${s.key}`} className={s.key === current.key ? "on" : ""}><Icon name={s.icon} size={20} />{s.label.split(" ")[0]}</a>)}</nav>
     {me.capabilities.includes("tasks") && <QuickCapture me={me} refs={ref} />}
     {notifOpen && <div className="sheet" onClick={() => setNotifOpen(false)}><div onClick={(e) => e.stopPropagation()}><h3>Notifications</h3>{notifs.length === 0 ? <Empty>No notifications.</Empty> : notifs.map((n) => <div className="row" key={n.id}><div><div>{n.message}</div><div className="sub">{fmtDateTime(n.created_at)}</div></div></div>)}</div></div>}
     <Toaster />
