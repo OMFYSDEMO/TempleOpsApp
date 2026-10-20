@@ -1,7 +1,7 @@
 import { newRouter, requireCap } from "../app";
 import { HttpError, all } from "../db";
 import { todayIn } from "../domain/dates";
-import { expenseSummary, precloseExceptions, revenueSummary } from "../services/reports";
+import { expenseSummary, precloseExceptions, revenueSummary, marketingScorecard } from "../services/reports";
 import { allowed } from "../auth";
 
 const r = newRouter();
@@ -15,6 +15,17 @@ r.get("/revenue", requireCap("revenue_reports"), async (c) => {
   const rev = await revenueSummary(c.env.DB, p.id, per);
   const pending = await all(c.env.DB, "SELECT COUNT(*) AS n FROM approvals WHERE property_id = ? AND status = 'pending'", p.id);
   return c.json({ ...rev, pending_approvals: (pending[0] as any).n });
+});
+
+/** Marketing scorecard over the last N months (default 6), ending with the current month. */
+r.get("/marketing", requireCap("revenue_reports"), async (c) => {
+  const p = c.get("property");
+  const n = Math.min(24, Math.max(1, Number(c.req.query("months") ?? 6) || 6));
+  const end = (c.req.query("to") ?? todayIn(p.timezone)).slice(0, 7);
+  const months: string[] = [];
+  let [y, m] = end.split("-").map(Number);
+  for (let i = 0; i < n; i++) { months.unshift(`${y}-${String(m).padStart(2, "0")}`); m--; if (m === 0) { m = 12; y--; } }
+  return c.json(await marketingScorecard(c.env.DB, p.id, months));
 });
 
 r.get("/preclose", requireCap("revenue_reports"), async (c) => c.json(await precloseExceptions(c.env.DB, c.get("property").id, period(c))));

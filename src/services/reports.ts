@@ -83,3 +83,53 @@ export async function gstSheet(db: D1Database, propertyId: string, period: strin
     change_log: changeLog,
   };
 }
+
+/**
+ * Marketing scorecard: what the agency's work turns into, measured from the books. Leads by month and
+ * source (with how many were answered inside the one-hour tolerance), the bookings they became, the
+ * room-nights and gross revenue of those bookings, and marketing spend from the expense book; the same
+ * cut by campaign, where the campaign came in on the lead (UTM, Meta campaign name, or typed by sales)
+ * and on the expense line.
+ */
+export async function marketingScorecard(db: D1Database, propertyId: string, months: string[]) {
+  const from = `${months[0]}-01`, to = `${months[months.length - 1]}-31`;
+  const leadCols = `COUNT(*) AS leads,
+        SUM(CASE WHEN l.first_response_at IS NOT NULL AND (julianday(replace(l.first_response_at,' ','T')) - julianday(replace(l.created_at,' ','T'))) * 24 <= 1 THEN 1 ELSE 0 END) AS answered_1h,
+        SUM(CASE WHEN l.status IN ('quoted','hold','won') OR l.quote_total_paise IS NOT NULL THEN 1 ELSE 0 END) AS quoted,
+        SUM(CASE WHEN l.status = 'won' AND b.id IS NOT NULL AND b.status NOT IN ('cancelled','no_show') THEN 1 ELSE 0 END) AS won,
+        SUM(CASE WHEN l.status = 'lost' THEN 1 ELSE 0 END) AS lost,
+        COALESCE(SUM(CASE WHEN l.status = 'won' AND b.status NOT IN ('cancelled','no_show') THEN b.nights ELSE 0 END), 0) AS room_nights,
+        COALESCE(SUM(CASE WHEN l.status = 'won' AND b.status NOT IN ('cancelled','no_show') THEN b.gross_paise ELSE 0 END), 0) AS revenue_paise`;
+  const bySource = await all<any>(db, `SELECT substr(l.created_at,1,7) AS month, l.source, ${leadCols}
+     FROM leads l LEFT JOIN bookings b ON b.id = l.booking_id
+     WHERE l.property_id = ? AND substr(l.created_at,1,10) BETWEEN ? AND ? GROUP BY month, l.source ORDER BY month, l.source`, propertyId, from, to);
+  const byCampaign = await all<any>(db, `SELECT COALESCE(NULLIF(l.campaign,''), '(no campaign)') AS campaign, l.source, ${leadCols}
+     FROM leads l LEFT JOIN bookings b ON b.id = l.booking_id
+     WHERE l.property_id = ? AND substr(l.created_at,1,10) BETWEEN ? AND ? GROUP BY campaign, l.source ORDER BY leads DESC`, propertyId, from, to);
+  const spend = await all<any>(db, `SELECT substr(on_date,1,7) AS month, COALESCE(NULLIF(campaign,''), '(no campaign)') AS campaign, SUM(amount_paise) AS spend_paise, COUNT(*) AS lines
+     FROM expenses WHERE property_id = ? AND category = 'marketing' AND voided_at IS NULL AND on_date BETWEEN ? AND ? GROUP BY month, campaign ORDER BY month`, propertyId, from, to);
+  const perMonth = months.map((m) => {
+    const rows = bySource.filter((r) => r.month === m);
+    const sum = (k: string) => rows.reduce((a, r) => a + Number(r[k] ?? 0), 0);
+    const sp = spend.filter((r) => r.month === m).reduce((a, r) => a + Number(r.spend_paise), 0);
+    const leads = sum("leads"), won = sum("won");
+    return { month: m, leads, answered_1h: sum("answered_1h"), quoted: sum("quoted"), won, lost: sum("lost"), room_nights: sum("room_nights"), revenue_paise: sum("revenue_paise"), spend_paise: sp,
+      cost_per_lead_paise: leads ? Math.round(sp / leads) : null, cost_per_booking_paise: won ? Math.round(sp / won) : null, revenue_per_rupee: sp ? Math.round((sum("revenue_paise") / sp) * 100) / 100 : null };
+  });
+  const sources = [...new Set(bySource.map((r) => r.source))].map((source) => {
+    const rows = bySource.filter((r) => r.source === source);
+    const sum = (k: string) => rows.reduce((a, r) => a + Number(r[k] ?? 0), 0);
+    return { source, leads: sum("leads"), answered_1h: sum("answered_1h"), quoted: sum("quoted"), won: sum("won"), lost: sum("lost"), room_nights: sum("room_nights"), revenue_paise: sum("revenue_paise") };
+  }).sort((a, b) => b.leads - a.leads);
+  const campaignNames = [...new Set([...byCampaign.map((r) => r.campaign), ...spend.map((r) => r.campaign)])];
+  const campaigns = campaignNames.map((campaign) => {
+    const rows = byCampaign.filter((r) => r.campaign === campaign);
+    const sum = (k: string) => rows.reduce((a, r) => a + Number(r[k] ?? 0), 0);
+    const sp = spend.filter((r) => r.campaign === campaign).reduce((a, r) => a + Number(r.spend_paise), 0);
+    const leads = sum("leads"), won = sum("won");
+    return { campaign, sources: [...new Set(rows.map((r) => r.source))], leads, answered_1h: sum("answered_1h"), won, room_nights: sum("room_nights"), revenue_paise: sum("revenue_paise"), spend_paise: sp,
+      cost_per_lead_paise: leads && sp ? Math.round(sp / leads) : null, cost_per_booking_paise: won && sp ? Math.round(sp / won) : null };
+  }).sort((a, b) => (b.spend_paise + b.revenue_paise) - (a.spend_paise + a.revenue_paise));
+  const totals = perMonth.reduce((t, m) => ({ leads: t.leads + m.leads, won: t.won + m.won, revenue_paise: t.revenue_paise + m.revenue_paise, spend_paise: t.spend_paise + m.spend_paise, room_nights: t.room_nights + m.room_nights, answered_1h: t.answered_1h + m.answered_1h }), { leads: 0, won: 0, revenue_paise: 0, spend_paise: 0, room_nights: 0, answered_1h: 0 });
+  return { months, per_month: perMonth, by_source: sources, by_campaign: campaigns, totals: { ...totals, cost_per_lead_paise: totals.leads ? Math.round(totals.spend_paise / totals.leads) : null, cost_per_booking_paise: totals.won ? Math.round(totals.spend_paise / totals.won) : null } };
+}

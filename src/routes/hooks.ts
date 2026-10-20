@@ -10,7 +10,7 @@ import { notifyRole } from "../services/notify";
  */
 const r = new Hono<{ Bindings: Env }>();
 
-async function createLeadFromHook(env: Env, propertyId: string, lead: { source: string; name: string; phone?: string | null; email?: string | null; check_in?: string | null; check_out?: string | null; rooms?: number | null; adults?: number | null; notes?: string | null; external_ref?: string | null }) {
+async function createLeadFromHook(env: Env, propertyId: string, lead: { source: string; name: string; phone?: string | null; email?: string | null; check_in?: string | null; check_out?: string | null; rooms?: number | null; adults?: number | null; notes?: string | null; external_ref?: string | null; campaign?: string | null; utm_source?: string | null; utm_medium?: string | null; ad_name?: string | null }) {
   if (lead.external_ref) {
     const dup = await one(env.DB, "SELECT id FROM leads WHERE property_id = ? AND source = ? AND external_ref = ?", propertyId, lead.source, lead.external_ref);
     if (dup) return { id: (dup as any).id, duplicate: true };
@@ -21,8 +21,9 @@ async function createLeadFromHook(env: Env, propertyId: string, lead: { source: 
   if (!guestId) { guestId = id("gst"); b.add("INSERT INTO guests (id, property_id, name, phone, email) VALUES (?,?,?,?,?)", guestId, propertyId, lead.name, phone, lead.email ?? null); }
   const sales = await one<{ id: string }>(env.DB, "SELECT id FROM users WHERE property_id = ? AND role = 'sales' AND active = 1 ORDER BY created_at LIMIT 1", propertyId);
   const lid = id("led");
-  b.add("INSERT INTO leads (id, property_id, guest_id, source, status, check_in, check_out, rooms_wanted, adults, notes, assigned_to, external_ref) VALUES (?,?,?,?,'new',?,?,?,?,?,?,?)",
-    lid, propertyId, guestId, lead.source, lead.check_in ?? null, lead.check_out ?? null, lead.rooms ?? 1, lead.adults ?? 2, lead.notes ?? null, sales?.id ?? null, lead.external_ref ?? null);
+  const clip = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 120) : null);
+  b.add("INSERT INTO leads (id, property_id, guest_id, source, status, check_in, check_out, rooms_wanted, adults, notes, assigned_to, external_ref, campaign, utm_source, utm_medium, ad_name) VALUES (?,?,?,?,'new',?,?,?,?,?,?,?,?,?,?,?)",
+    lid, propertyId, guestId, lead.source, lead.check_in ?? null, lead.check_out ?? null, lead.rooms ?? 1, lead.adults ?? 2, lead.notes ?? null, sales?.id ?? null, lead.external_ref ?? null, clip(lead.campaign), clip(lead.utm_source), clip(lead.utm_medium), clip(lead.ad_name));
   await notifyRole(b, propertyId, "sales", "lead_new", `New ${lead.source} lead: ${lead.name}`, { kind: "lead", id: lid });
   b.audit("lead.create", "lead", lid, null, { source: lead.source, via: "hook" });
   await b.run();
@@ -43,7 +44,7 @@ r.post("/leads/website", async (c) => {
   const ct = c.req.header("content-type") ?? "";
   const x: any = ct.includes("json") ? await c.req.json() : Object.fromEntries((await c.req.formData()).entries());
   if (!x.name) throw new HttpError(400, "name required");
-  const res = await createLeadFromHook(c.env, propertyId, { source: "website", name: String(x.name), phone: x.phone, email: x.email, check_in: x.check_in, check_out: x.check_out, rooms: x.rooms ? Number(x.rooms) : null, adults: x.adults ? Number(x.adults) : null, notes: x.message ?? x.notes ?? null });
+  const res = await createLeadFromHook(c.env, propertyId, { campaign: x.campaign ?? x.utm_campaign ?? null, utm_source: x.utm_source ?? null, utm_medium: x.utm_medium ?? null, ad_name: x.utm_content ?? x.ad ?? null, source: "website", name: String(x.name), phone: x.phone, email: x.email, check_in: x.check_in, check_out: x.check_out, rooms: x.rooms ? Number(x.rooms) : null, adults: x.adults ? Number(x.adults) : null, notes: x.message ?? x.notes ?? null });
   return c.json(res, res.duplicate ? 200 : 201);
 });
 
@@ -60,7 +61,7 @@ async function metaSignatureOk(secret: string, header: string | undefined, raw: 
 }
 
 /** Lead answers: Meta's standard question names plus the custom ones a form may carry; everything else goes into the notes. */
-function leadFromFields(fieldData: { name: string; values?: string[] }[] | undefined, v: { leadgen_id?: string; platform?: string; form_id?: string; ad_name?: string }) {
+function leadFromFields(fieldData: { name: string; values?: string[] }[] | undefined, v: { leadgen_id?: string; platform?: string; form_id?: string; ad_name?: string; campaign_name?: string; adset_name?: string }) {
   const fields: Record<string, string> = {};
   for (const f of fieldData ?? []) fields[f.name.toLowerCase()] = Array.isArray(f.values) ? String(f.values[0] ?? "") : String((f as any).values ?? "");
   const pick = (...names: string[]) => { for (const n of names) if (fields[n]) return fields[n]; return null; };
@@ -70,14 +71,14 @@ function leadFromFields(fieldData: { name: string; values?: string[] }[] | undef
   const name = pick("full_name", "name") ?? [first, last].filter(Boolean).join(" ") ?? "";
   const platform = /ig|instagram/i.test(v.platform ?? "") ? "instagram" : "facebook";
   const notes = [pick("message", "notes", "requirements"), ...extras, v.ad_name ? `ad: ${v.ad_name}` : null].filter(Boolean).join(" · ") || null;
-  return { source: platform, name: name || `Meta lead ${v.leadgen_id ?? ""}`.trim(), phone: pick("phone_number", "phone"), email: pick("email"), check_in: pick("check_in", "checkin", "check-in", "arrival"), check_out: pick("check_out", "checkout", "check-out", "departure"), rooms: Number(pick("rooms", "number_of_rooms") ?? "") || null, adults: Number(pick("adults", "guests") ?? "") || null, notes, external_ref: v.leadgen_id ? String(v.leadgen_id) : null };
+  return { campaign: v.campaign_name ?? null, ad_name: v.ad_name ?? null, utm_source: platform, utm_medium: "lead_ad", source: platform, name: name || `Meta lead ${v.leadgen_id ?? ""}`.trim(), phone: pick("phone_number", "phone"), email: pick("email"), check_in: pick("check_in", "checkin", "check-in", "arrival"), check_out: pick("check_out", "checkout", "check-out", "departure"), rooms: Number(pick("rooms", "number_of_rooms") ?? "") || null, adults: Number(pick("adults", "guests") ?? "") || null, notes, external_ref: v.leadgen_id ? String(v.leadgen_id) : null };
 }
 
 /** The webhook only carries the lead id; the answers live in the Graph API behind a Page token with leads_retrieval. */
-async function fetchMetaLead(env: Env, leadgenId: string): Promise<{ field_data?: { name: string; values?: string[] }[]; platform?: string; form_id?: string; ad_name?: string } | null> {
+async function fetchMetaLead(env: Env, leadgenId: string): Promise<{ field_data?: { name: string; values?: string[] }[]; platform?: string; form_id?: string; ad_name?: string; campaign_name?: string; adset_name?: string } | null> {
   if (!env.META_PAGE_TOKEN) return null;
   const v = env.META_GRAPH_VERSION ?? "v21.0";
-  const res = await fetch(`https://graph.facebook.com/${v}/${encodeURIComponent(leadgenId)}?fields=field_data,platform,form_id,ad_name,created_time&access_token=${encodeURIComponent(env.META_PAGE_TOKEN)}`);
+  const res = await fetch(`https://graph.facebook.com/${v}/${encodeURIComponent(leadgenId)}?fields=field_data,platform,form_id,ad_name,adset_name,campaign_name,created_time&access_token=${encodeURIComponent(env.META_PAGE_TOKEN)}`);
   if (!res.ok) { console.error("meta lead fetch failed", leadgenId, res.status, await res.text()); return null; }
   return await res.json();
 }
@@ -104,7 +105,7 @@ r.post("/leads/meta", async (c) => {
     const v = ch.value ?? {};
     let detail: Awaited<ReturnType<typeof fetchMetaLead>> = Array.isArray(v.field_data) ? v : null;
     if (!detail && v.leadgen_id) detail = await fetchMetaLead(c.env, String(v.leadgen_id));
-    const lead = leadFromFields(detail?.field_data, { leadgen_id: v.leadgen_id, platform: detail?.platform ?? v.platform, form_id: detail?.form_id ?? v.form_id, ad_name: detail?.ad_name });
+    const lead = leadFromFields(detail?.field_data, { leadgen_id: v.leadgen_id, platform: detail?.platform ?? v.platform, form_id: detail?.form_id ?? v.form_id, ad_name: detail?.ad_name, campaign_name: detail?.campaign_name, adset_name: detail?.adset_name });
     if (!detail) lead.notes = [lead.notes, `answers not fetched: open lead ${v.leadgen_id ?? "?"} in Meta Business Suite`].filter(Boolean).join(" · ");
     const res = await createLeadFromHook(c.env, propertyId, lead);
     out.push(res);

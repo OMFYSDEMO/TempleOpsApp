@@ -56,10 +56,10 @@ r.post("/", async (c) => {
   if (!guestId) { guestId = id("gst"); b.add("INSERT INTO guests (id, property_id, name, phone, email) VALUES (?,?,?,?,?)", guestId, p.id, name, phone, optStr(x.email, "email")); }
   const lid = id("led");
   const assigned = optStr(x.assigned_to, "assigned_to") ?? (actor.role === "sales" ? actor.id : null);
-  b.add(`INSERT INTO leads (id, property_id, guest_id, source, status, check_in, check_out, rooms_wanted, adults, children, notes, assigned_to, external_ref)
-         VALUES (?,?,?,?,'new',?,?,?,?,?,?,?,?)`,
+  b.add(`INSERT INTO leads (id, property_id, guest_id, source, status, check_in, check_out, rooms_wanted, adults, children, notes, assigned_to, external_ref, campaign)
+         VALUES (?,?,?,?,'new',?,?,?,?,?,?,?,?,?)`,
     lid, p.id, guestId, source, optStr(x.check_in, "check_in"), optStr(x.check_out, "check_out"), int(x.rooms_wanted ?? 1, "rooms_wanted", { min: 1 }),
-    int(x.adults ?? 2, "adults", { min: 1 }), int(x.children ?? 0, "children", { min: 0, optional: true }), optStr(x.notes, "notes"), assigned, optStr(x.external_ref, "external_ref"));
+    int(x.adults ?? 2, "adults", { min: 1 }), int(x.children ?? 0, "children", { min: 0, optional: true }), optStr(x.notes, "notes"), assigned, optStr(x.external_ref, "external_ref"), optStr(x.campaign, "campaign"));
   b.audit("lead.create", "lead", lid, null, { source, name, phone });
   await b.run();
   return c.json({ id: lid, guest_id: guestId }, 201);

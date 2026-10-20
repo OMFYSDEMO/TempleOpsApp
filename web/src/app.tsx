@@ -7,6 +7,7 @@ import { FrontDesk, Payments, Invoices, Tasks, Expenses, QuickCapture } from "./
 import { Approvals, Payouts, Reconcile, RevenueOverview, OwnerDashboard, BankExpenses, Admin, MonthClose, GstSheet, AuditLog } from "./screens/management";
 import { MyWork } from "./screens/work";
 import { GuestIds } from "./screens/ids";
+import { Marketing } from "./screens/marketing";
 import { Login, ResetPassword, ChangePassword } from "./screens/auth";
 import { Icon } from "./icons";
 
@@ -31,6 +32,7 @@ const SCREENS: Screen[] = [
   { key: "payouts", label: "OTA payouts", cap: "settlements", group: "Revenue", comp: Payouts, icon: "swap" },
   { key: "recon", label: "Smart Reconcile", cap: "recon", group: "Revenue", comp: Reconcile, icon: "reconcile" },
   { key: "revdash", label: "Revenue overview", cap: "revenue_reports", group: "Revenue", comp: RevenueOverview, icon: "chart" },
+  { key: "mkt", label: "Marketing scorecard", cap: "revenue_reports", group: "Revenue", comp: Marketing, icon: "chart" },
   { key: "dash", label: "Dashboard", cap: "pnl_reports", group: "Owner", comp: OwnerDashboard, mobile: true, icon: "dashboard" },
   { key: "bankexp", label: "Bank expenses", cap: "bank_expenses", group: "Owner", comp: BankExpenses, icon: "bank" },
   { key: "admin", label: "Settings & users", cap: "admin", group: "Owner", comp: Admin, icon: "settings" },

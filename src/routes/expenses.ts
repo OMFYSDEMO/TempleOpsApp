@@ -81,10 +81,10 @@ r.post("/", async (c) => {
   const { gst } = splitInclusive(amount, gstBp);
   const eid = id("exp");
   const b = new Batch(c.env.DB, actor);
-  b.add(`INSERT INTO expenses (id, property_id, kind, category, description, vendor_name, vendor_gstin, bill_no, bill_date, amount_paise, gst_rate_bp, gst_paise, paid_from_account_id, on_date, reference, bill_photo_key, recorded_by, idempotency_key)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  b.add(`INSERT INTO expenses (id, property_id, kind, category, description, vendor_name, vendor_gstin, bill_no, bill_date, amount_paise, gst_rate_bp, gst_paise, paid_from_account_id, on_date, reference, bill_photo_key, recorded_by, idempotency_key, campaign)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     eid, p.id, "normal", oneOf(x.category, "category", CATEGORIES), optStr(x.description, "description"), optStr(x.vendor_name, "vendor_name"), gstin?.toUpperCase() ?? null, optStr(x.bill_no, "bill_no"), optStr(x.bill_date, "bill_date"),
-    amount, gstBp, gst, acct.id, onDate, optStr(x.reference, "reference"), optStr(x.bill_photo_key, "bill_photo_key"), actor.id, idem);
+    amount, gstBp, gst, acct.id, onDate, optStr(x.reference, "reference"), optStr(x.bill_photo_key, "bill_photo_key"), actor.id, idem, optStr(x.campaign, "campaign"));
   b.audit("expense.create", "expense", eid, null, { amount_paise: amount, category: x.category, account: acct.name });
   await b.run();
   return c.json({ id: eid, gst_paise: gst, itc_note: p.gstin ? "GST on purchases is not creditable while rooms are supplied at the 5% slab" : null }, 201);
@@ -101,7 +101,7 @@ r.patch("/:id", async (c) => {
   await assertPeriodOpen(c.env.DB, p.id, e.on_date);
   const x = await body(c);
   const after: Record<string, unknown> = {};
-  for (const k of ["description", "vendor_name", "bill_no", "bill_date", "bill_photo_key", "reference"]) if (x[k] !== undefined) after[k] = optStr(x[k], k);
+  for (const k of ["description", "vendor_name", "bill_no", "bill_date", "bill_photo_key", "reference", "campaign"]) if (x[k] !== undefined) after[k] = optStr(x[k], k);
   if (x.vendor_gstin !== undefined) { const g = optStr(x.vendor_gstin, "vendor_gstin"); if (g && !gstinFormatValid(g)) throw new HttpError(400, "vendor GSTIN format is invalid"); after.vendor_gstin = g?.toUpperCase() ?? null; }
   if (x.category !== undefined) after.category = oneOf(x.category, "category", CATEGORIES);
   if (x.gst_rate_bp !== undefined) { const bp = int(x.gst_rate_bp, "gst_rate_bp", { min: 0, max: 2800 }); after.gst_rate_bp = bp; after.gst_paise = splitInclusive(e.amount_paise, bp).gst; }
