@@ -61,3 +61,24 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []): { data: 
 }
 export function Loading(p: { error?: string | null }) { return p.error ? <div className="empty bad">{p.error}</div> : <div className="empty">Loading…</div>; }
 export function Money(p: { v: number | null | undefined }) { return <span className="num">{inr(p.v)}</span>; }
+
+/**
+ * Category picker: the few categories a desk uses daily as one-tap chips, everything else in a dropdown grouped
+ * by family. A choice made in the dropdown shows as the selected chip, so the picker never grows past one row.
+ */
+export function CategoryPicker(p: { value: string; onChange: (code: string) => void; categories: { code: string; label: string; family: string }[]; common: string[]; families: string[]; label?: string }) {
+  const byCode = new Map(p.categories.map((c) => [c.code, c]));
+  const chips = p.common.filter((c) => byCode.has(c));
+  const extra = p.value && !chips.includes(p.value) ? byCode.get(p.value) : null;
+  return <div className="catpick">
+    {p.label && <div className="sub">{p.label}</div>}
+    <div className="chips">
+      {chips.map((code) => <Chip key={code} on={p.value === code} onClick={() => p.onChange(code)}>{byCode.get(code)!.label}</Chip>)}
+      {extra && <Chip on onClick={() => {}}>{extra.label}</Chip>}
+      <select className="catmore" value="" onChange={(e: any) => { if (e.currentTarget.value) p.onChange(e.currentTarget.value); }} aria-label="More categories">
+        <option value="">More…</option>
+        {p.families.map((f) => <optgroup key={f} label={f}>{p.categories.filter((c) => c.family === f).map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</optgroup>)}
+      </select>
+    </div>
+  </div>;
+}

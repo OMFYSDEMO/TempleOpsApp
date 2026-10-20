@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { get, post, patch, del } from "../api";
-import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, inr, fmtDate, fmtDateTime, useLoad, run, toast, thisPeriod } from "../ui";
+import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, inr, fmtDate, fmtDateTime, useLoad, run, toast, thisPeriod , CategoryPicker } from "../ui";
 import { catLabel, type Me, type Ref } from "../app";
 
 export function Approvals({ me }: { me: Me; refs: Ref }) {
@@ -122,9 +122,17 @@ export function BankExpenses({ refs }: { me: Me; refs: Ref }) {
   return <>
     <h2>Bank expenses <small>the owner's one entry duty · each carries its NEFT reference and auto-matches at reconciliation</small></h2>
     <div className="grid two">
-      <Card title="New expense · paid by bank transfer"><Chips value={f.category} options={refs.expense_categories.filter((c) => c.bank).map((c) => ({ value: c.code, label: c.label }))} onChange={(v) => setF({ ...f, category: v })} />
-        <div className="grid two"><Field label="Description"><input value={f.description} onChange={(e: any) => setF({ ...f, description: e.currentTarget.value })} placeholder="KSEB electricity · Sep" /></Field><Field label="Amount incl. GST (₹)"><input inputMode="decimal" value={f.amount} onChange={(e: any) => setF({ ...f, amount: e.currentTarget.value })} /></Field><Field label="Vendor"><input value={f.vendor_name} onChange={(e: any) => setF({ ...f, vendor_name: e.currentTarget.value })} /></Field><Field label="Vendor GSTIN"><input value={f.vendor_gstin} onChange={(e: any) => setF({ ...f, vendor_gstin: e.currentTarget.value })} /></Field><Field label="GST rate on the bill"><select value={f.gst_rate_bp} onChange={(e: any) => setF({ ...f, gst_rate_bp: Number(e.currentTarget.value) })}><option value={0}>none</option><option value={500}>5%</option><option value={1200}>12%</option><option value={1800}>18%</option><option value={2800}>28%</option></select></Field><Field label="Bank reference (NEFT/UPI)"><input value={f.reference} onChange={(e: any) => setF({ ...f, reference: e.currentTarget.value })} /></Field></div>
-        <div className="actions end"><Btn kind="primary" disabled={!f.amount} onClick={() => run(async () => { await post("/expenses", { ...f, amount_paise: Math.round(Number(f.amount) * 100), account_id: bank?.id }); setF({ ...f, description: "", amount: "", reference: "" }); await q.reload(); }, "Recorded")}>Record</Btn></div></Card>
+      <Card title="New expense · paid by bank transfer" sub="pick a category, type the amount and the bank reference; it matches itself at reconciliation">
+        <CategoryPicker label="Category" value={f.category} onChange={(v) => setF({ ...f, category: v })} categories={refs.expense_categories.filter((c) => c.bank)} common={refs.common_categories.bank} families={refs.expense_families} />
+        <div className="form-grid">
+          <Field label="Description"><input value={f.description} onChange={(e: any) => setF({ ...f, description: e.currentTarget.value })} placeholder="KSEB electricity · Sep" /></Field>
+          <Field label="Amount incl. GST (₹)"><input inputMode="decimal" value={f.amount} onChange={(e: any) => setF({ ...f, amount: e.currentTarget.value })} /></Field>
+          <Field label="Vendor"><input value={f.vendor_name} onChange={(e: any) => setF({ ...f, vendor_name: e.currentTarget.value })} /></Field>
+          <Field label="Vendor GSTIN" hint="15 characters, when the bill carries one"><input value={f.vendor_gstin} onChange={(e: any) => setF({ ...f, vendor_gstin: e.currentTarget.value })} /></Field>
+          <Field label="GST rate on the bill"><select value={f.gst_rate_bp} onChange={(e: any) => setF({ ...f, gst_rate_bp: Number(e.currentTarget.value) })}><option value={0}>none</option><option value={500}>5%</option><option value={1200}>12%</option><option value={1800}>18%</option><option value={2800}>28%</option></select></Field>
+          <Field label="Bank reference (NEFT/UPI)"><input value={f.reference} onChange={(e: any) => setF({ ...f, reference: e.currentTarget.value })} /></Field>
+        </div>
+        <div className="actions end"><Btn kind="primary" disabled={!f.amount} onClick={() => run(async () => { await post("/expenses", { ...f, amount_paise: Math.round(Number(f.amount) * 100), account_id: bank?.id }); setF({ ...f, description: "", amount: "", reference: "" }); await q.reload(); }, "Recorded")}>Record expense</Btn></div></Card>
       <Card title="Petty-cash top-up" sub="a transfer from the bank to the property manager — not an expense"><Field label="Amount (₹)"><input inputMode="decimal" value={top} onChange={(e: any) => setTop(e.currentTarget.value)} /></Field><div className="actions end"><Btn kind="primary" disabled={!top} onClick={() => run(async () => { await post("/payments/transfers", { from_account_id: bank?.id, to_account_id: petty?.id, amount_paise: Math.round(Number(top) * 100) }); setTop(""); }, "Top-up recorded as a transfer")}>Top up petty cash</Btn></div></Card>
     </div>
     <Field label="Month"><input type="month" value={period} onChange={(e: any) => setPeriod(e.currentTarget.value)} /></Field>
