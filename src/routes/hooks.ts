@@ -8,7 +8,7 @@ import { notifyRole } from "../services/notify";
  * Unauthenticated inbound hooks (lead sources). They are gated by a shared secret in the URL
  * (?key=) that the owner sets as HOOK_SECRET; each hook only ever creates a lead card.
  */
-const r = new Hono<{ Bindings: Env & { HOOK_SECRET?: string } }>();
+const r = new Hono<{ Bindings: Env }>();
 
 async function createLeadFromHook(env: Env, propertyId: string, lead: { source: string; name: string; phone?: string | null; email?: string | null; check_in?: string | null; check_out?: string | null; rooms?: number | null; adults?: number | null; notes?: string | null; external_ref?: string | null }) {
   if (lead.external_ref) {
@@ -47,24 +47,66 @@ r.post("/leads/website", async (c) => {
   return c.json(res, res.duplicate ? 200 : 201);
 });
 
-/** Meta Lead Ads webhook (Instagram/Facebook lead forms). GET = verification handshake; POST = leadgen events. */
+/** Meta signs each webhook delivery with HMAC-SHA256 of the raw body using the app secret. */
+async function metaSignatureOk(secret: string, header: string | undefined, raw: ArrayBuffer): Promise<boolean> {
+  if (!header?.startsWith("sha256=")) return false;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, raw));
+  const want = header.slice(7).toLowerCase();
+  const got = Array.from(sig).map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (want.length !== got.length) return false;
+  let diff = 0; for (let i = 0; i < got.length; i++) diff |= got.charCodeAt(i) ^ want.charCodeAt(i);
+  return diff === 0;
+}
+
+/** Lead answers: Meta's standard question names plus the custom ones a form may carry; everything else goes into the notes. */
+function leadFromFields(fieldData: { name: string; values?: string[] }[] | undefined, v: { leadgen_id?: string; platform?: string; form_id?: string; ad_name?: string }) {
+  const fields: Record<string, string> = {};
+  for (const f of fieldData ?? []) fields[f.name.toLowerCase()] = Array.isArray(f.values) ? String(f.values[0] ?? "") : String((f as any).values ?? "");
+  const pick = (...names: string[]) => { for (const n of names) if (fields[n]) return fields[n]; return null; };
+  const known = new Set(["full_name", "first_name", "last_name", "name", "email", "phone_number", "phone", "check_in", "checkin", "check-in", "arrival", "check_out", "checkout", "check-out", "departure", "rooms", "number_of_rooms", "adults", "guests", "message", "notes", "requirements"]);
+  const extras = Object.entries(fields).filter(([k, val]) => !known.has(k) && val).map(([k, val]) => `${k.replace(/_/g, " ")}: ${val}`);
+  const first = pick("first_name"), last = pick("last_name");
+  const name = pick("full_name", "name") ?? [first, last].filter(Boolean).join(" ") ?? "";
+  const platform = /ig|instagram/i.test(v.platform ?? "") ? "instagram" : "facebook";
+  const notes = [pick("message", "notes", "requirements"), ...extras, v.ad_name ? `ad: ${v.ad_name}` : null].filter(Boolean).join(" · ") || null;
+  return { source: platform, name: name || `Meta lead ${v.leadgen_id ?? ""}`.trim(), phone: pick("phone_number", "phone"), email: pick("email"), check_in: pick("check_in", "checkin", "check-in", "arrival"), check_out: pick("check_out", "checkout", "check-out", "departure"), rooms: Number(pick("rooms", "number_of_rooms") ?? "") || null, adults: Number(pick("adults", "guests") ?? "") || null, notes, external_ref: v.leadgen_id ? String(v.leadgen_id) : null };
+}
+
+/** The webhook only carries the lead id; the answers live in the Graph API behind a Page token with leads_retrieval. */
+async function fetchMetaLead(env: Env, leadgenId: string): Promise<{ field_data?: { name: string; values?: string[] }[]; platform?: string; form_id?: string; ad_name?: string } | null> {
+  if (!env.META_PAGE_TOKEN) return null;
+  const v = env.META_GRAPH_VERSION ?? "v21.0";
+  const res = await fetch(`https://graph.facebook.com/${v}/${encodeURIComponent(leadgenId)}?fields=field_data,platform,form_id,ad_name,created_time&access_token=${encodeURIComponent(env.META_PAGE_TOKEN)}`);
+  if (!res.ok) { console.error("meta lead fetch failed", leadgenId, res.status, await res.text()); return null; }
+  return await res.json();
+}
+
+/**
+ * Meta Lead Ads webhook (Instagram and Facebook lead forms).
+ * GET = the subscription handshake (verify token = HOOK_SECRET). POST = leadgen events: the signature is checked
+ * against the app secret, the answers are fetched from the Graph API, and each lead becomes a card for sales.
+ * A lead whose answers cannot be fetched still becomes a card, so nothing is lost; the id is on it.
+ */
 r.get("/leads/meta", (c) => {
   const secret = c.env.HOOK_SECRET;
-  if (c.req.query("hub.mode") === "subscribe" && c.req.query("hub.verify_token") === secret) return c.text(c.req.query("hub.challenge") ?? "");
+  if (secret && c.req.query("hub.mode") === "subscribe" && c.req.query("hub.verify_token") === secret) return c.text(c.req.query("hub.challenge") ?? "");
   return c.text("forbidden", 403);
 });
 r.post("/leads/meta", async (c) => {
   const propertyId = gate(c);
-  const payload: any = await c.req.json();
+  const raw = await c.req.arrayBuffer();
+  if (c.env.META_APP_SECRET && !(await metaSignatureOk(c.env.META_APP_SECRET, c.req.header("x-hub-signature-256"), raw))) throw new HttpError(401, "bad signature");
+  const payload: any = JSON.parse(new TextDecoder().decode(raw) || "{}");
   const out: unknown[] = [];
   for (const entry of payload.entry ?? []) for (const ch of entry.changes ?? []) {
+    if (ch.field && ch.field !== "leadgen") continue;
     const v = ch.value ?? {};
-    // Meta sends leadgen_id; field values arrive only when the lead is retrieved via Graph API or when the page
-    // is configured to push field_data. Both shapes are accepted; the card is created with whatever arrived.
-    const fields: Record<string, string> = {};
-    for (const f of v.field_data ?? []) fields[f.name] = Array.isArray(f.values) ? f.values[0] : f.values;
-    const source = /instagram/i.test(v.platform ?? "") ? "instagram" : "facebook";
-    const res = await createLeadFromHook(c.env, propertyId, { source, name: fields.full_name ?? fields.name ?? `Meta lead ${v.leadgen_id ?? ""}`.trim(), phone: fields.phone_number ?? fields.phone, email: fields.email, check_in: fields.check_in ?? null, check_out: fields.check_out ?? null, rooms: fields.rooms ? Number(fields.rooms) : null, notes: fields.message ?? null, external_ref: v.leadgen_id ? String(v.leadgen_id) : null });
+    let detail: Awaited<ReturnType<typeof fetchMetaLead>> = Array.isArray(v.field_data) ? v : null;
+    if (!detail && v.leadgen_id) detail = await fetchMetaLead(c.env, String(v.leadgen_id));
+    const lead = leadFromFields(detail?.field_data, { leadgen_id: v.leadgen_id, platform: detail?.platform ?? v.platform, form_id: detail?.form_id ?? v.form_id, ad_name: detail?.ad_name });
+    if (!detail) lead.notes = [lead.notes, `answers not fetched: open lead ${v.leadgen_id ?? "?"} in Meta Business Suite`].filter(Boolean).join(" · ");
+    const res = await createLeadFromHook(c.env, propertyId, lead);
     out.push(res);
   }
   return c.json({ received: out.length, leads: out });

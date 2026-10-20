@@ -138,15 +138,22 @@ The parsers were written against the common STAAH, SwiftBook and Airpay template
 
 ## 9. Lead hooks (website form, Instagram and Facebook lead forms)
 
-1. Create the hook secret (a long random string):
+Every enquiry becomes a lead card assigned to the sales desk, with a notification, and WhatsApp quotes go out from the card. Three repository secrets drive it (GitHub → Settings → Secrets and variables → Actions → New repository secret); the deploy pushes each one to the Worker.
 
-```sh
-npx wrangler secret put HOOK_SECRET --env production
-```
+| Secret | What it is |
+|---|---|
+| `HOOK_SECRET` | Any long random string. It is the `?key=` in the hook URLs and the verify token for the Meta webhook. |
+| `META_APP_SECRET` | Meta app → App settings → Basic → App secret. Every webhook delivery is checked against it. |
+| `META_PAGE_TOKEN` | A long-lived Page access token with `leads_retrieval`, `pages_show_list`, `pages_manage_metadata`. The answers to a lead form are fetched with it. |
 
-2. **Website form**: point it at `https://avos.YOUR-DOMAIN/hooks/leads/website?key=<HOOK_SECRET>` with fields `name`, `phone`, `email`, `check_in`, `check_out`, `rooms`, `adults`, `message` (JSON or form-encoded). Each submission becomes a lead card assigned to sales.
-3. **Meta lead forms**: in the Meta developer app add a Webhook for the Page `leadgen` field, callback URL `https://avos.YOUR-DOMAIN/hooks/leads/meta?key=<HOOK_SECRET>`, verify token = the same secret. Meta requires the `leads_retrieval` permission and App Review before it sends real leads; start that early.
-4. WhatsApp quotes need no setup: the Quote button opens WhatsApp with the message prefilled.
+1. **Website form.** Point the site's enquiry form at `https://app.shajianandan.com/hooks/leads/website?key=<HOOK_SECRET>` (POST, JSON or form-encoded) with fields `name`, `phone`, `email`, `check_in`, `check_out`, `rooms`, `adults`, `message`. Only `name` is required. The response is `201 {"id": …}`.
+2. **Meta app.** At https://developers.facebook.com create an app of type *Business*, add the **Webhooks** and **Facebook Login for Business** products, and connect the Meadows Facebook Page (the Instagram professional account must be linked to that Page).
+3. **Webhook.** Webhooks → Page → Subscribe to `leadgen`. Callback URL `https://app.shajianandan.com/hooks/leads/meta?key=<HOOK_SECRET>`, verify token `<HOOK_SECRET>`. The handshake succeeds only after `HOOK_SECRET` has been deployed.
+4. **Page token.** Graph API Explorer → choose the app → generate a User token with `leads_retrieval`, `pages_show_list`, `pages_manage_metadata`, `pages_read_engagement` → exchange for a long-lived token → `GET /me/accounts` gives the Page token. Save it as `META_PAGE_TOKEN`. Then subscribe the Page to the app: `POST /{page-id}/subscribed_apps?subscribed_fields=leadgen` with that token.
+5. **App Review.** Meta sends real leads only once `leads_retrieval` is approved in App Review (a short screencast of the lead arriving as a card in AVOS is what they ask for). Until then, the Lead Ads Testing Tool at https://developers.facebook.com/tools/lead-ads-testing creates test leads that go through the whole path.
+6. **Form questions.** Standard questions (full name, email, phone) map themselves. Add custom questions named `check_in`, `check_out`, `rooms`, `adults`, `message` and they land in the right fields; any other question is appended to the notes.
+
+A lead whose answers could not be fetched (token expired, review pending) still becomes a card carrying the Meta lead id, so nothing is lost.
 
 ## 10. GST, TCS/TDS and backups
 

@@ -61,6 +61,24 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: d1 migrations apply ivos --remote --env production
 
+      # Worker secrets come from repository secrets of the same name (Settings → Secrets and variables → Actions):
+      #   HOOK_SECRET      — key in the lead-hook URLs and the Meta webhook verify token (any long random string)
+      #   META_APP_SECRET  — Meta app → App settings → Basic → App secret
+      #   META_PAGE_TOKEN  — long-lived Page access token with leads_retrieval, pages_show_list, pages_manage_metadata
+      # Each one present is pushed to the Worker on every deploy; absent ones are left as they are.
+      - name: Sync Worker secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOOK_SECRET: ${{ secrets.HOOK_SECRET }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+          META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+        run: |
+          for name in HOOK_SECRET META_APP_SECRET META_PAGE_TOKEN; do
+            val="${!name}"
+            if [ -n "$val" ]; then printf '%s' "$val" | npx wrangler secret put "$name" --env production >/dev/null && echo "$name: set"; else echo "$name: not provided, unchanged"; fi
+          done
+
       - name: Deploy Worker
         id: deploy
         uses: cloudflare/wrangler-action@v3

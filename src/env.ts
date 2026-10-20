@@ -7,6 +7,10 @@ export interface Env {
   ACCESS_AUD: string;           // optional: pin one Access application
   DEV_USER_EMAIL: string;       // used only outside production when no session or Access token is present
   INBOX_PROPERTY_ID?: string;   // property that owns the routed mailbox (single-tenant pilot)
+  HOOK_SECRET?: string;         // shared key in lead-hook URLs (?key=) and the Meta webhook verify token (secret)
+  META_APP_SECRET?: string;     // Meta app secret: verifies X-Hub-Signature-256 on lead webhooks (secret)
+  META_PAGE_TOKEN?: string;     // long-lived Page access token with leads_retrieval: fetches lead answers from the Graph API (secret)
+  META_GRAPH_VERSION?: string;  // optional, e.g. v21.0
   APP_URL?: string;             // public base URL used in password links, e.g. https://avos.shajianandan.com
   EMAIL?: { send(msg: { from: string; to: string; subject: string; text: string; html?: string }): Promise<unknown> }; // Cloudflare Email Sending binding (optional)
   EMAIL_FROM?: string;          // verified sender, e.g. avos@shajianandan.com
