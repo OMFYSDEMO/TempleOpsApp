@@ -38,6 +38,11 @@ jobs:
             echo "::error::the token cannot list Access applications; grant it 'Access: Apps and Policies → Edit' or remove the application in Zero Trust → Access → Applications"
             exit 1
           fi
+          echo "Zero Trust organisation of this account:"; api "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/organization" | jq -c '{success, auth_domain: .result.auth_domain, name: .result.name, errors}'
+          zone=$(api "https://api.cloudflare.com/client/v4/zones?name=${DOMAIN#*.}" | jq -r '.result[0].id // empty')
+          echo "Zone for ${DOMAIN#*.}: ${zone:-not visible to this token}"
+          if [ -n "$zone" ]; then echo "Zone-level Access applications:"; api "https://api.cloudflare.com/client/v4/zones/$zone/access/apps" | jq -r '.result[]? | "- \(.name) type=\(.type) domain=\(.domain)"'; fi
+          echo "What a visitor gets at https://$DOMAIN/ :"; curl -sI "https://$DOMAIN/" | grep -i -E "^HTTP|^location|^cf-access|^set-cookie: CF_" || true
           echo "All Access applications in the account:"; echo "$apps" | jq -r '.result[] | "- \(.name) type=\(.type) domain=\(.domain) self_hosted=\(.self_hosted_domains // [] | join(","))"'
           # A hostname is covered by an application whose domain is the host itself, a path under it, or a wildcard over its parent.
           covers='def covers($d): . as $dom | ($dom | contains($d)) or (($dom | startswith("*.")) and ($d | endswith($dom[1:])))'
