@@ -34,6 +34,11 @@ jobs:
           fi
           echo "Accounts visible to the token:"; api https://api.cloudflare.com/client/v4/accounts | jq -r '.result[] | "- \(.name) (\(.id))"'
           echo "Using account $ACCOUNT"
+          echo "Zero Trust organisation of this account:"; show "$(api -m 60 "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/organization")" '{success, auth_domain: .result.auth_domain, name: .result.name, errors}'
+          zone=$(api "https://api.cloudflare.com/client/v4/zones?name=${DOMAIN#*.}" | jq -r '.result[0].id // empty')
+          echo "Zone for ${DOMAIN#*.}: ${zone:-not visible to this token}"
+          if [ -n "$zone" ]; then zapps=$(api -m 60 "https://api.cloudflare.com/client/v4/zones/$zone/access/apps"); echo "Zone-level Access applications:"; show "$zapps" '{success, n: (.result // [] | length), errors}'; echo "$zapps" | jq -r '.result[]? | "- \(.name) (\(.id)) type=\(.type) domain=\(.domain)"' 2>/dev/null || true; fi
+          echo "What a visitor gets at https://$DOMAIN/ :"; curl -sI -m 20 "https://$DOMAIN/" | grep -i -E "^HTTP|^location|^cf-access|^set-cookie: CF_" || true
           apps=$(api -m 60 "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/apps?per_page=100")
           echo "Account-level listing:"; show "$apps" '{success, n: (.result // [] | length), errors}'
           if [ "$(echo "$apps" | jq -r '.success' 2>/dev/null)" != "true" ]; then
@@ -41,15 +46,11 @@ jobs:
             if [ -n "${zapps:-}" ] && [ "$(echo "$zapps" | jq -r '.success' 2>/dev/null)" = "true" ]; then echo "using the zone-level listing"; apps="$zapps"; fi
           fi
           if [ "$(echo "$apps" | jq -r '.success' 2>/dev/null)" != "true" ]; then
-            echo "$apps" | jq -r '.errors[]? | "::error::Cloudflare said: \(.code) \(.message)"'
+            show "$apps" '{success, errors}'
+            echo "$apps" | grep -o -i -E "error code: [0-9]+|Error [0-9]{3}|<title>[^<]*</title>" | head -3 || true
             echo "::error::the token cannot list Access applications; grant it 'Access: Apps and Policies → Edit' or remove the application in Zero Trust → Access → Applications"
             exit 1
           fi
-          echo "Zero Trust organisation of this account:"; show "$(api -m 60 "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/organization")" '{success, auth_domain: .result.auth_domain, name: .result.name, errors}'
-          zone=$(api "https://api.cloudflare.com/client/v4/zones?name=${DOMAIN#*.}" | jq -r '.result[0].id // empty')
-          echo "Zone for ${DOMAIN#*.}: ${zone:-not visible to this token}"
-          if [ -n "$zone" ]; then zapps=$(api -m 60 "https://api.cloudflare.com/client/v4/zones/$zone/access/apps"); echo "Zone-level Access applications:"; show "$zapps" '{success, n: (.result // [] | length), errors}'; echo "$zapps" | jq -r '.result[]? | "- \(.name) (\(.id)) type=\(.type) domain=\(.domain)"' 2>/dev/null || true; fi
-          echo "What a visitor gets at https://$DOMAIN/ :"; curl -sI "https://$DOMAIN/" | grep -i -E "^HTTP|^location|^cf-access|^set-cookie: CF_" || true
           echo "All Access applications in the account:"; echo "$apps" | jq -r '.result[] | "- \(.name) type=\(.type) domain=\(.domain) self_hosted=\(.self_hosted_domains // [] | join(","))"'
           # A hostname is covered by an application whose domain is the host itself, a path under it, or a wildcard over its parent.
           covers='def covers($d): . as $dom | ($dom | contains($d)) or (($dom | startswith("*.")) and ($d | endswith($dom[1:])))'
