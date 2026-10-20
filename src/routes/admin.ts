@@ -4,6 +4,7 @@ import { gstinFormatValid } from "../domain/gst";
 import { CAN } from "../auth";
 import { todayIn } from "../domain/dates";
 import { setPassword, createPasswordLink } from "./auth";
+import { EXPENSE_CATEGORIES } from "../domain/expenseCategories";
 
 const r = newRouter();
 
@@ -25,7 +26,7 @@ r.get("/ref", async (c) => {
     all(c.env.DB, "SELECT id, name, role FROM users WHERE property_id = ? AND active = 1", p.id),
     all(c.env.DB, "SELECT id, room_id, name, rate_paise, from_date, to_date, priority FROM rate_cards WHERE property_id = ? ORDER BY room_id, priority", p.id),
   ]);
-  return c.json({ locations, channels, accounts, users, rate_cards: rateCards });
+  return c.json({ locations, channels, accounts, users, rate_cards: rateCards, expense_categories: EXPENSE_CATEGORIES });
 });
 
 r.get("/notifications", async (c) => {

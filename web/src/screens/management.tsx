@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { get, post, patch, del } from "../api";
 import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, inr, fmtDate, fmtDateTime, useLoad, run, toast, thisPeriod } from "../ui";
-import type { Me, Ref } from "../app";
+import { catLabel, type Me, type Ref } from "../app";
 
 export function Approvals({ me }: { me: Me; refs: Ref }) {
   const q = useLoad(() => get("/approvals"), []);
@@ -94,7 +94,7 @@ export function RevenueOverview({ me }: { me: Me; refs: Ref }) {
   </>;
 }
 
-export function OwnerDashboard({ }: { me: Me; refs: Ref }) {
+export function OwnerDashboard({ refs }: { me: Me; refs: Ref }) {
   const [period, setPeriod] = useState(thisPeriod());
   const q = useLoad(() => get(`/reports/owner?period=${period}`), [period]);
   const pnl = useLoad(() => get(`/reports/pnl?period=${period}`), [period]);
@@ -106,14 +106,13 @@ export function OwnerDashboard({ }: { me: Me; refs: Ref }) {
       <div className="hero"><div className="top"><div className="lbl">Operating result, {new Date(period + "-01T00:00:00").toLocaleString("en-IN", { month: "long", year: "numeric" })}</div><Status s={q.data.month.status} /></div><div className="big">{inr(q.data.operating_result_paise)}</div>
         <div className="meta"><div><small>Revenue (ex-GST)</small><b>{inr(q.data.revenue_paise)}</b></div><div><small>Expenses</small><b>{inr(q.data.expenses_paise)}</b></div><div><small>Awaiting OTA payout</small><b>{inr(q.data.ota_clearing.paise)}</b></div><div><small>Direct share</small><b>{q.data.direct_share_pct}%</b></div></div></div>
       <div className="grid two">
-        <Card title="Expenses by category">{!pnl.data ? <Loading /> : pnl.data.expenses.by_category.length === 0 ? <Empty>None.</Empty> : pnl.data.expenses.by_category.map((e: any) => <Row key={e.category + e.kind} label={`${e.category}${e.kind !== "normal" ? ` · ${e.kind.replace(/_/g, " ")}` : ""} · ${e.n}`} value={inr(e.amount_paise)} />)}{pnl.data && <Row strong label="OTA & gateway costs within the above" value={inr(pnl.data.expenses.ota_and_gateway_costs_paise)} />}</Card>
+        <Card title="Expenses by category">{!pnl.data ? <Loading /> : pnl.data.expenses.by_category.length === 0 ? <Empty>None.</Empty> : pnl.data.expenses.by_category.map((e: any) => <Row key={e.category + e.kind} label={`${catLabel(refs, e.category)}${e.kind !== "normal" ? ` · ${e.kind.replace(/_/g, " ")}` : ""} · ${e.n}`} value={inr(e.amount_paise)} />)}{pnl.data && <Row strong label="OTA & gateway costs within the above" value={inr(pnl.data.expenses.ota_and_gateway_costs_paise)} />}</Card>
         <Card title="Cash position">{!acc.data ? <Loading /> : acc.data.accounts.map((a: any) => <Row key={a.id} label={a.name} sub={a.holder_role} value={inr(a.balance_paise)} />)}</Card>
       </div>
       <Card title="Who does what" sub="this org in one table">{q.data.who_does_what.map((u: any) => <Row key={u.name} label={{ sales: "Bookings & reservations", property: "Check-in/out, collections, tasks, petty cash", revenue: "Approvals, payouts, reconciliation, pre-close", owner: "Bank-paid expenses, oversight", accountant: "Month lock & GST filing" }[u.role as string]} value={u.name} />)}</Card></>}
   </>;
 }
 
-const BANK_CATS = [["utilities", "Power & utilities"], ["subscriptions", "Subscriptions"], ["professional", "Professional fees"], ["marketing", "Marketing"], ["salaries", "Salaries"], ["repairs", "Repairs"], ["misc", "Misc"]] as const;
 export function BankExpenses({ refs }: { me: Me; refs: Ref }) {
   const [period, setPeriod] = useState(thisPeriod());
   const q = useLoad(() => get(`/expenses?scope=bank&period=${period}`), [period]);
@@ -123,13 +122,13 @@ export function BankExpenses({ refs }: { me: Me; refs: Ref }) {
   return <>
     <h2>Bank expenses <small>the owner's one entry duty · each carries its NEFT reference and auto-matches at reconciliation</small></h2>
     <div className="grid two">
-      <Card title="New expense · paid by bank transfer"><Chips value={f.category} options={BANK_CATS.map(([v, l]) => ({ value: v, label: l }))} onChange={(v) => setF({ ...f, category: v })} />
+      <Card title="New expense · paid by bank transfer"><Chips value={f.category} options={refs.expense_categories.filter((c) => c.bank).map((c) => ({ value: c.code, label: c.label }))} onChange={(v) => setF({ ...f, category: v })} />
         <div className="grid two"><Field label="Description"><input value={f.description} onChange={(e: any) => setF({ ...f, description: e.currentTarget.value })} placeholder="KSEB electricity · Sep" /></Field><Field label="Amount incl. GST (₹)"><input inputMode="decimal" value={f.amount} onChange={(e: any) => setF({ ...f, amount: e.currentTarget.value })} /></Field><Field label="Vendor"><input value={f.vendor_name} onChange={(e: any) => setF({ ...f, vendor_name: e.currentTarget.value })} /></Field><Field label="Vendor GSTIN"><input value={f.vendor_gstin} onChange={(e: any) => setF({ ...f, vendor_gstin: e.currentTarget.value })} /></Field><Field label="GST rate on the bill"><select value={f.gst_rate_bp} onChange={(e: any) => setF({ ...f, gst_rate_bp: Number(e.currentTarget.value) })}><option value={0}>none</option><option value={500}>5%</option><option value={1200}>12%</option><option value={1800}>18%</option><option value={2800}>28%</option></select></Field><Field label="Bank reference (NEFT/UPI)"><input value={f.reference} onChange={(e: any) => setF({ ...f, reference: e.currentTarget.value })} /></Field></div>
         <div className="actions end"><Btn kind="primary" disabled={!f.amount} onClick={() => run(async () => { await post("/expenses", { ...f, amount_paise: Math.round(Number(f.amount) * 100), account_id: bank?.id }); setF({ ...f, description: "", amount: "", reference: "" }); await q.reload(); }, "Recorded")}>Record</Btn></div></Card>
       <Card title="Petty-cash top-up" sub="a transfer from the bank to the property manager — not an expense"><Field label="Amount (₹)"><input inputMode="decimal" value={top} onChange={(e: any) => setTop(e.currentTarget.value)} /></Field><div className="actions end"><Btn kind="primary" disabled={!top} onClick={() => run(async () => { await post("/payments/transfers", { from_account_id: bank?.id, to_account_id: petty?.id, amount_paise: Math.round(Number(top) * 100) }); setTop(""); }, "Top-up recorded as a transfer")}>Top up petty cash</Btn></div></Card>
     </div>
     <Field label="Month"><input type="month" value={period} onChange={(e: any) => setPeriod(e.currentTarget.value)} /></Field>
-    <Card title="This month · bank-paid">{!q.data ? <Loading error={q.error} /> : q.data.expenses.length === 0 ? <Empty>None in {period}.</Empty> : q.data.expenses.map((e: any) => <div className="row" key={e.id}><div><div>{e.description ?? e.category} {e.kind !== "normal" && <Status s={e.kind} />}{e.voided_at && <Status s="void" />}</div><div className="sub">{fmtDate(e.on_date)} · {e.vendor_name ?? "—"}{e.vendor_gstin ? " · GSTIN ✓" : ""}{e.reference ? ` · ${e.reference}` : ""}</div></div><div className="actions"><b className="num">{inr(e.amount_paise)}</b>{!e.voided_at && e.kind === "normal" && <Btn small kind="danger" onClick={() => { const reason = prompt("Void reason"); if (reason) run(async () => { await post(`/expenses/${e.id}/void`, { reason }); await q.reload(); }, "Voided"); }}>Void</Btn>}</div></div>)}</Card>
+    <Card title="This month · bank-paid">{!q.data ? <Loading error={q.error} /> : q.data.expenses.length === 0 ? <Empty>None in {period}.</Empty> : q.data.expenses.map((e: any) => <div className="row" key={e.id}><div><div>{e.description ?? catLabel(refs, e.category)} <span className="muted">· {catLabel(refs, e.category)}</span> {e.kind !== "normal" && <Status s={e.kind} />}{e.voided_at && <Status s="void" />}</div><div className="sub">{fmtDate(e.on_date)} · {e.vendor_name ?? "—"}{e.vendor_gstin ? " · GSTIN ✓" : ""}{e.reference ? ` · ${e.reference}` : ""}</div></div><div className="actions"><b className="num">{inr(e.amount_paise)}</b>{!e.voided_at && e.kind === "normal" && <Btn small kind="danger" onClick={() => { const reason = prompt("Void reason"); if (reason) run(async () => { await post(`/expenses/${e.id}/void`, { reason }); await q.reload(); }, "Voided"); }}>Void</Btn>}</div></div>)}</Card>
   </>;
 }
 

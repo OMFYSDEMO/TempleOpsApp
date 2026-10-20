@@ -138,6 +138,7 @@ describe("Lead → CA", () => {
     expect(done.expense_id).toBeTruthy();
     expect((await api("sindhu", "POST", "/api/expenses", { category: "misc", amount_paise: 100, vendor_gstin: "32AAACx…" })).status).toBe(400); // GSTIN format-validated
     await ok("shaji", "POST", "/api/expenses", { category: "utilities", amount_paise: 476500, account_id: "acc_bank", vendor_name: "KSEB", reference: "NEFT8841" });
+
     // Deposit desk cash to bank, top up petty cash: transfers, never expenses.
     await ok("shaji", "POST", "/api/payments/transfers", { from_account_id: "acc_cash", to_account_id: "acc_bank", amount_paise: 1750000, reference: "CASH DEP" });
     await ok("shaji", "POST", "/api/payments/transfers", { from_account_id: "acc_bank", to_account_id: "acc_petty", amount_paise: 300000 });
@@ -148,6 +149,13 @@ describe("Lead → CA", () => {
     expect(cash.balance_paise).toBe(2000000 - 1750000);
     const exp = await ok("shaji", "GET", "/api/expenses?scope=all&period=" + new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 7));
     expect(exp.expenses.find((e: any) => e.kind === "normal" && e.amount_paise === 300000)).toBeUndefined(); // top-up is not an expense
+    // The category list is shared by the API, the screens and the reports; new ones (rent, government fees…) are accepted.
+    await ok("shaji", "POST", "/api/expenses", { category: "rent", amount_paise: 2500000, account_id: "acc_bank", vendor_name: "Landlord", reference: "NEFT9001" });
+    await ok("shaji", "POST", "/api/expenses", { category: "government_fees", amount_paise: 150000, account_id: "acc_bank", vendor_name: "Panchayat", description: "Trade licence renewal" });
+    expect((await api("sindhu", "POST", "/api/expenses", { category: "holidays", amount_paise: 100 })).status).toBe(400);
+    const ref = await ok("sindhu", "GET", "/api/ref");
+    expect(ref.expense_categories.find((c: any) => c.code === "rent")).toMatchObject({ label: "Rent & lease", bank: true, petty: false });
+    expect(ref.expense_categories.length).toBeGreaterThan(20);
     // The petty cash book: each month opens with what the previous month closed at — the float is never reset.
     const period = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 7);
     const [y, m] = period.split("-").map(Number); const next = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}`;

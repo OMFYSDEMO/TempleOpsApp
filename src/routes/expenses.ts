@@ -6,7 +6,8 @@ import { splitInclusive } from "../domain/money";
 import { allowed } from "../auth";
 
 const r = newRouter();
-export const CATEGORIES = ["repairs", "fnb", "housekeeping", "amenities", "utilities", "subscriptions", "professional", "marketing", "bank_charges", "salaries", "misc"] as const;
+import { CATEGORIES, EXPENSE_CATEGORIES } from "../domain/expenseCategories";
+export { CATEGORIES };
 
 /**
  * Expenses split by who holds the money (W5): petty-cash/cash expenses are the property manager's,
@@ -22,7 +23,7 @@ r.get("/", async (c) => {
   const kindFilter = scope === "bank" ? "AND a.kind = 'bank'" : scope === "petty" ? "AND a.kind IN ('petty_cash','cash')" : "";
   const rows = await all(c.env.DB, `SELECT e.*, a.name AS account_name, a.kind AS account_kind, u.name AS recorded_name FROM expenses e LEFT JOIN money_accounts a ON a.id = e.paid_from_account_id LEFT JOIN users u ON u.id = e.recorded_by
      WHERE e.property_id = ? AND substr(e.on_date,1,7) = ? ${kindFilter} ORDER BY e.on_date DESC, e.created_at DESC`, p.id, period);
-  return c.json({ period, scope, expenses: rows, categories: CATEGORIES });
+  return c.json({ period, scope, expenses: rows, categories: EXPENSE_CATEGORIES });
 });
 
 /**
