@@ -1,0 +1,49 @@
+# One-off: remove the Cloudflare Access application in front of the app, now that AVOS has its own login.
+# Run it from the Actions tab (workflow_dispatch). It needs the same CLOUDFLARE_API_TOKEN the deploy uses,
+# with Access: Apps and Policies → Edit on the account; without that permission it stops and says so.
+name: Remove Cloudflare Access
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: Hostname whose Access application should be removed
+        default: avos.shajianandan.com
+        required: true
+      confirm:
+        description: Type "remove" to delete the application (anything else only lists what would go)
+        default: list
+        required: true
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find and remove the Access application
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DOMAIN: ${{ github.event.inputs.domain }}
+          CONFIRM: ${{ github.event.inputs.confirm }}
+        run: |
+          set -euo pipefail
+          api() { curl -sS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "$@"; }
+          if [ -z "$ACCOUNT" ]; then
+            ACCOUNT=$(api https://api.cloudflare.com/client/v4/accounts | jq -r '.result[0].id // empty')
+            [ -n "$ACCOUNT" ] || { echo "::error::could not determine the account: set the CLOUDFLARE_ACCOUNT_ID secret"; exit 1; }
+          fi
+          apps=$(api "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/apps?per_page=100")
+          if [ "$(echo "$apps" | jq -r '.success')" != "true" ]; then
+            echo "$apps" | jq -r '.errors[]? | "::error::Cloudflare said: \(.code) \(.message)"'
+            echo "::error::the token cannot list Access applications; grant it 'Access: Apps and Policies → Edit' or remove the application in Zero Trust → Access → Applications"
+            exit 1
+          fi
+          matches=$(echo "$apps" | jq -c --arg d "$DOMAIN" '[.result[] | select((.domain // "" | contains($d)) or ((.self_hosted_domains // []) | map(contains($d)) | any))]')
+          n=$(echo "$matches" | jq 'length')
+          echo "Access applications covering $DOMAIN: $n"
+          echo "$matches" | jq -r '.[] | "- \(.name) (\(.id)) domain=\(.domain) self_hosted=\(.self_hosted_domains // [] | join(","))"'
+          [ "$n" -gt 0 ] || { echo "nothing to remove: no Access application covers $DOMAIN"; exit 0; }
+          if [ "$CONFIRM" != "remove" ]; then echo "confirm was '$CONFIRM': listed only, nothing deleted"; exit 0; fi
+          for id in $(echo "$matches" | jq -r '.[].id'); do
+            r=$(api -X DELETE "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/apps/$id")
+            if [ "$(echo "$r" | jq -r '.success')" = "true" ]; then echo "removed $id"; else echo "$r" | jq -r '.errors[]? | "::error::\(.code) \(.message)"'; exit 1; fi
+          done
+          echo "Done: $DOMAIN is served directly; AVOS's own sign-in is the only login."

@@ -29,7 +29,8 @@
   },
 
   // Production: deploy with `npm run deploy` (= wrangler deploy --env production).
-  // ACCESS_TEAM_DOMAIN pins the Zero Trust team whose logins are trusted; ACCESS_AUD (optional) pins one application.
+  // ACCESS_TEAM_DOMAIN is blank: AVOS has its own email + password login and no longer sits behind Cloudflare Access.
+  // Set it to a Zero Trust team domain (and optionally ACCESS_AUD) only if an Access application is put back in front.
   // HOOK_SECRET is a secret: `npx wrangler secret put HOOK_SECRET --env production`.
   "env": {
     "production": {
@@ -49,7 +50,7 @@
       "workers_dev": true,
       "vars": {
         "APP_ENV": "production",
-        "ACCESS_TEAM_DOMAIN": "kshetrom.cloudflareaccess.com",
+        "ACCESS_TEAM_DOMAIN": "",
         "ACCESS_AUD": "",
         "DEV_USER_EMAIL": "",
         "INBOX_PROPERTY_ID": "prop_meadows",
