@@ -53,7 +53,8 @@
         "ACCESS_AUD": "",
         "DEV_USER_EMAIL": "",
         "INBOX_PROPERTY_ID": "prop_meadows",
-        "APP_URL": "https://avos.shajianandan.com",
+        // Password links use the address the request came in on (custom domain or workers.dev); set APP_URL only to pin one.
+        "APP_URL": "",
         "EMAIL_FROM": ""
       }
       // Password-reset emails: onboard a domain to Email Service (Compute → Email Service), then uncomment and set EMAIL_FROM:
