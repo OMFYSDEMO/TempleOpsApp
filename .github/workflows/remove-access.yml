@@ -30,13 +30,18 @@ jobs:
             ACCOUNT=$(api https://api.cloudflare.com/client/v4/accounts | jq -r '.result[0].id // empty')
             [ -n "$ACCOUNT" ] || { echo "::error::could not determine the account: set the CLOUDFLARE_ACCOUNT_ID secret"; exit 1; }
           fi
+          echo "Accounts visible to the token:"; api https://api.cloudflare.com/client/v4/accounts | jq -r '.result[] | "- \(.name) (\(.id))"'
+          echo "Using account $ACCOUNT"
           apps=$(api "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/apps?per_page=100")
           if [ "$(echo "$apps" | jq -r '.success')" != "true" ]; then
             echo "$apps" | jq -r '.errors[]? | "::error::Cloudflare said: \(.code) \(.message)"'
             echo "::error::the token cannot list Access applications; grant it 'Access: Apps and Policies → Edit' or remove the application in Zero Trust → Access → Applications"
             exit 1
           fi
-          matches=$(echo "$apps" | jq -c --arg d "$DOMAIN" '[.result[] | select((.domain // "" | contains($d)) or ((.self_hosted_domains // []) | map(contains($d)) | any))]')
+          echo "All Access applications in the account:"; echo "$apps" | jq -r '.result[] | "- \(.name) type=\(.type) domain=\(.domain) self_hosted=\(.self_hosted_domains // [] | join(","))"'
+          # A hostname is covered by an application whose domain is the host itself, a path under it, or a wildcard over its parent.
+          covers='def covers($d): . as $dom | ($dom | contains($d)) or (($dom | startswith("*.")) and ($d | endswith($dom[1:])))'
+          matches=$(echo "$apps" | jq -c --arg d "$DOMAIN" "$covers; [.result[] | select(((.domain // \"\") | covers(\$d)) or ((.self_hosted_domains // []) | map(covers(\$d)) | any))]")
           n=$(echo "$matches" | jq 'length')
           echo "Access applications covering $DOMAIN: $n"
           echo "$matches" | jq -r '.[] | "- \(.name) (\(.id)) domain=\(.domain) self_hosted=\(.self_hosted_domains // [] | join(","))"'
