@@ -30,7 +30,7 @@ export function parseStaah(subject: string, body: string, year: number): ParsedE
   const channel = grab(body, /(?:Channel|Source|OTA)\s*:?\s*([A-Za-z.\- ]+?)(?:\n|Ref|Guest|$)/i) ?? grab(subject, /(Booking\.com|Agoda|Expedia|MakeMyTrip|Goibibo|Airbnb)/i);
   const ref = grab(body, /(?:Ref(?:erence)?|Reservation (?:ID|No\.?)|Booking (?:ID|No\.?))\s*:?\s*#?\s*([0-9]{6,})/i);
   const guest = grab(body, /Guest(?: Name)?\s*:?\s*([^\n·]+?)(?:\s*·|\n|$)/i);
-  const room = grab(body, /Room(?: Type)?\s*:?\s*([A-Za-z ]+?)\s*(?:×|x|\n|·)/i);
+  const room = grab(body, /Room(?: Type)?\s*:?\s*([A-Za-z][A-Za-z ]*?)\s*(?:×|x|\n|·)/i);
   const roomsN = Number(grab(body, /(?:×|x)\s*(\d+)/) ?? "1");
   const dates = body.match(/(\d{1,2}(?:\s+[A-Za-z]{3,})?)\s*(?:→|->|to|–|-)\s*(\d{1,2}\s+[A-Za-z]{3,}(?:\s+\d{4})?)/);
   let checkIn: string | null = null, checkOut: string | null = null;
@@ -65,7 +65,7 @@ export function parseSwiftbook(subject: string, body: string, year: number): Par
   const co = grab(body, /Check[- ]?out\s*:?\s*([0-9]{1,2}[\/-][0-9]{1,2}[\/-][0-9]{2,4}|[0-9]{4}-[0-9]{2}-[0-9]{2}|\d{1,2} [A-Za-z]{3,}(?: \d{4})?)/i);
   const payOnline = /pay online|paid online|payment received/i.test(body);
   const data = { guest_name: guest, rooms, nights, nightly_rate_paise: rate ? rupeesToPaise(rate) : null, total_incl_gst_paise: total ? rupeesToPaise(total) : null,
-    check_in: ci ? parseLooseDate(ci, year) : null, check_out: co ? parseLooseDate(co, year) : null, pay_online: payOnline, room_name: grab(body, /Room(?: Type)?\s*:?\s*([A-Za-z ]+?)\s*(?:×|x|\n|·)/i) };
+    check_in: ci ? parseLooseDate(ci, year) : null, check_out: co ? parseLooseDate(co, year) : null, pay_online: payOnline, room_name: grab(body, /Room(?: Type)?\s*:?\s*([A-Za-z][A-Za-z ]*?)\s*(?:×|x|\n|·)/i) };
   const confidence = guest && itin && data.check_in && data.check_out ? "high" : "low";
   return { source: "swiftbook", kind, external_ref: itin, data, confidence };
 }

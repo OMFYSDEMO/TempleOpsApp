@@ -15,6 +15,7 @@ export interface PropertyRow {
   auto_approve_on_tariff: number; auto_approve_max_rooms: number;
   quote_valid_hours: number; hold_hours: number; lead_nudge_minutes: number; lead_escalate_minutes: number;
   recon_fee_tolerance_bp: number; recon_subset_tolerance_bp: number;
+  inbox_automation: number;
 }
 
 export async function loadProperty(db: D1Database, id: string): Promise<PropertyRow> {

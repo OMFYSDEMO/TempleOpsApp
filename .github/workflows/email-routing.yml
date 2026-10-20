@@ -1,0 +1,60 @@
+# One-off: point Email Routing at the app so STAAH / SwiftBook / Airpay mail reaches the inbox automatically.
+# Run from the Actions tab. Needs CLOUDFLARE_API_TOKEN with "Zone → Email Routing Rules: Edit" and "Zone → DNS: Edit"
+# on the zone; it stops and says so when a permission is missing. Safe to re-run: it reports what already exists.
+name: Set up Email Routing
+on:
+  workflow_dispatch:
+    inputs:
+      address:
+        description: Inbox address the Worker should receive
+        default: inbox@shajianandan.com
+        required: true
+      worker:
+        description: Worker script that handles the mail
+        default: avos
+        required: true
+      confirm:
+        description: Type "apply" to make changes (anything else only reports)
+        default: report
+        required: true
+jobs:
+  routing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable Email Routing and route the inbox address to the Worker
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ADDRESS: ${{ github.event.inputs.address }}
+          WORKER: ${{ github.event.inputs.worker }}
+          CONFIRM: ${{ github.event.inputs.confirm }}
+        run: |
+          set -euo pipefail
+          api() { curl -sS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "$@"; }
+          fail() { echo "::error::$1"; exit 1; }
+          domain="${ADDRESS#*@}"
+          zone=$(api "https://api.cloudflare.com/client/v4/zones?name=$domain" | jq -r '.result[0].id // empty')
+          [ -n "$zone" ] || fail "zone $domain is not visible to this token"
+          echo "Zone $domain: $zone"
+          echo "Existing MX records (mail already delivered elsewhere if any are not Cloudflare's):"
+          api "https://api.cloudflare.com/client/v4/zones/$zone/dns_records?type=MX&per_page=50" | jq -r '.result[] | "- \(.name) → \(.content) (prio \(.priority))"'
+          foreign=$(api "https://api.cloudflare.com/client/v4/zones/$zone/dns_records?type=MX&per_page=50" | jq -r --arg d "$domain" '[.result[] | select(.name == $d and (.content | test("mx.cloudflare.net") | not))] | length')
+          st=$(api "https://api.cloudflare.com/client/v4/zones/$zone/email/routing")
+          echo "$st" | jq -c '{success, enabled: .result.enabled, status: .result.status, errors}'
+          if [ "$(echo "$st" | jq -r '.success')" != "true" ]; then fail "the token cannot read Email Routing on this zone; add 'Zone → Email Routing Rules: Edit' to it, or do step 8 of docs/deploy-cloudflare.md in the dashboard"; fi
+          enabled=$(echo "$st" | jq -r '.result.enabled')
+          if [ "$enabled" != "true" ]; then
+            if [ "$foreign" != "0" ]; then fail "$domain already has non-Cloudflare MX records: enabling Email Routing would take over its mail. Use a subdomain (e.g. inbox@mail.$domain) instead."; fi
+            if [ "$CONFIRM" != "apply" ]; then echo "would enable Email Routing on $domain (adds MX/SPF records)"; else
+              r=$(api -X POST "https://api.cloudflare.com/client/v4/zones/$zone/email/routing/enable"); echo "$r" | jq -c '{success, errors}'
+              [ "$(echo "$r" | jq -r '.success')" = "true" ] || fail "could not enable Email Routing (DNS: Edit permission needed)"
+            fi
+          fi
+          rules=$(api "https://api.cloudflare.com/client/v4/zones/$zone/email/routing/rules?per_page=50")
+          echo "Routing rules:"; echo "$rules" | jq -r '.result[]? | "- \(.name // "(catch-all)") enabled=\(.enabled) \(.matchers | map(.value // "*") | join(",")) → \(.actions | map(.type + ":" + ((.value // []) | join(","))) | join(","))"'
+          have=$(echo "$rules" | jq -r --arg a "$ADDRESS" --arg w "$WORKER" '[.result[]? | select((.matchers | any(.value == $a)) and (.actions | any(.type == "worker" and (.value | index($w)))))] | length')
+          if [ "$have" != "0" ]; then echo "rule already routes $ADDRESS to worker $WORKER"; exit 0; fi
+          if [ "$CONFIRM" != "apply" ]; then echo "would add rule: $ADDRESS → worker $WORKER"; exit 0; fi
+          r=$(api -X POST "https://api.cloudflare.com/client/v4/zones/$zone/email/routing/rules" --data "$(jq -nc --arg a "$ADDRESS" --arg w "$WORKER" '{name: ("AVOS inbox → " + $w), enabled: true, matchers: [{type: "literal", field: "to", value: $a}], actions: [{type: "worker", value: [$w]}]}')")
+          echo "$r" | jq -c '{success, errors}'
+          [ "$(echo "$r" | jq -r '.success')" = "true" ] || fail "could not create the routing rule"
+          echo "Done: mail to $ADDRESS now reaches the $WORKER inbox handler."

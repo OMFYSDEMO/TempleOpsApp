@@ -1,9 +1,10 @@
 import { newRouter, requireCap, body, str, optStr, int, date } from "../app";
-import { Batch, HttpError, all, one, id } from "../db";
+import { Batch, HttpError, all, one, id, loadProperty } from "../db";
 import { nowIso } from "../domain/dates";
 import { splitInclusive } from "../domain/money";
 import { parseInboundEmail, PARSER_VERSION, type ParsedEmail } from "../email/parsers";
 import { createBooking, gstPolicy } from "../services/bookings";
+import { autoApply } from "../services/inboxAuto";
 import { slabBpForRoomNight } from "../domain/gst";
 import type { Env } from "../env";
 
@@ -35,7 +36,15 @@ export async function ingestEmail(env: Env, propertyId: string, msg: { message_i
     iid, propertyId, parsed.source, parsed.kind, msg.message_id, msg.from, msg.subject, msg.received_at ?? nowIso(), rawKey, JSON.stringify({ ...parsed.data, confidence: parsed.confidence }), PARSER_VERSION, parsed.external_ref, status);
   b.audit("inbox.ingest", "inbox_item", iid, null, { source: parsed.source, kind: parsed.kind, status, confidence: parsed.confidence });
   await b.run();
-  return { id: iid, status, parsed };
+  // Automation: apply it now when the facts line up; otherwise the card carries the reason it waited.
+  const property = await loadProperty(env.DB, propertyId);
+  let auto: Awaited<ReturnType<typeof autoApply>> | null = null;
+  if (property.inbox_automation === 1 && (status === "pending" || status === "routed")) {
+    auto = await autoApply(env.DB, property, { id: iid, kind: parsed.kind, source: parsed.source, external_ref: parsed.external_ref, subject: msg.subject }, parsed);
+    if (!auto.applied && auto.note !== "already recorded") await env.DB.prepare("UPDATE inbox_items SET auto_note = ? WHERE id = ?").bind(auto.note, iid).run();
+  }
+  const row = await one<{ status: string; booking_id: string | null; payment_id: string | null }>(env.DB, "SELECT status, booking_id, payment_id FROM inbox_items WHERE id = ?", iid);
+  return { id: iid, status: row?.status ?? status, booking_id: row?.booking_id ?? null, payment_id: row?.payment_id ?? null, auto, parsed };
 }
 
 /** Manual ingest (paste an email) — the same code path the Email Worker uses, handy before DNS is set up. */

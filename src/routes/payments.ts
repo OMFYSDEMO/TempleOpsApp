@@ -3,12 +3,11 @@ import { Batch, HttpError, all, one, id, assertPeriodOpen } from "../db";
 import { nowIso, todayIn } from "../domain/dates";
 import { applyBp } from "../domain/money";
 import { loadBooking, paidOnBooking } from "../services/bookings";
+import { recordPayment, METHODS } from "../services/payments";
 
 const r = newRouter();
 
-const METHODS = ["upi", "cash", "card", "airpay", "bank", "ota"] as const;
 /** Contracted gateway fees (bp of amount) by method; the fee expense is booked once, here (F4). */
-const GATEWAY_FEE_BP: Record<string, number> = { airpay: 200, card: 200, upi: 0, cash: 0, bank: 0, ota: 0 };
 
 async function account(db: D1Database, propertyId: string, accountId: string) {
   const a: any = await one(db, "SELECT * FROM money_accounts WHERE id = ? AND property_id = ? AND active = 1", accountId, propertyId);
@@ -63,48 +62,14 @@ r.get("/gateway-inbox", requireCap("payments"), async (c) => {
 r.post("/", requireCap("payments"), async (c) => {
   const p = c.get("property"); const actor = c.get("actor");
   const x = await body(c);
-  const idem = optStr(x.idempotency_key, "idempotency_key");
-  if (idem) { const ex = await one<{ id: string }>(c.env.DB, "SELECT id FROM payments WHERE property_id = ? AND idempotency_key = ?", p.id, idem); if (ex) return c.json({ id: ex.id, duplicate: true }); }
-  const bookingId = optStr(x.booking_id, "booking_id");
-  const method = oneOf(x.method, "method", METHODS);
-  const amount = paise(x.amount_paise, "amount_paise");
-  const receivedOn = optStr(x.received_on, "received_on") ?? todayIn(p.timezone);
-  await assertPeriodOpen(c.env.DB, p.id, receivedOn);
-  let guestId: string | null = optStr(x.guest_id, "guest_id");
-  let kind: "advance" | "balance" = "balance";
-  if (bookingId) {
-    const bk = await loadBooking(c.env.DB, p.id, bookingId);
-    if (["cancelled", "no_show"].includes(bk.status)) throw new HttpError(409, `booking is ${bk.status}`);
-    guestId = bk.guest_id;
-    kind = bk.status === "checked_in" || bk.status === "checked_out" ? "balance" : "advance";
-  }
-  // Default account by method: cash → cash in hand; upi/bank/card/airpay → bank (or the gateway clearing account if present).
-  let accountId = optStr(x.account_id, "account_id");
-  if (!accountId) {
-    const kindWanted = method === "cash" ? "cash" : method === "airpay" || method === "card" ? "gateway" : "bank";
-    const a = await one<{ id: string }>(c.env.DB, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = ? AND active = 1 ORDER BY id LIMIT 1", p.id, kindWanted)
-      ?? await one<{ id: string }>(c.env.DB, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = 'bank' AND active = 1 LIMIT 1", p.id);
-    if (!a) throw new HttpError(400, "no money account configured");
-    accountId = a.id;
-  } else await account(c.env.DB, p.id, accountId);
-  const pid = id("pay");
-  const b = new Batch(c.env.DB, actor);
-  const feeBp = int(x.fee_bp ?? GATEWAY_FEE_BP[method] ?? 0, "fee_bp", { min: 0, max: 1000, optional: true });
-  let feeId: string | null = null;
-  if (feeBp > 0) {
-    feeId = id("exp");
-    const fee = applyBp(amount, feeBp);
-    b.add(`INSERT INTO expenses (id, property_id, kind, category, description, amount_paise, gst_rate_bp, gst_paise, paid_from_account_id, on_date, payment_id, recorded_by)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, feeId, p.id, "gateway_fee", "bank_charges", `${method} fee ${feeBp / 100}% on payment ${pid}`, fee, 0, 0, accountId, receivedOn, pid, actor.id);
-  }
-  b.add(`INSERT INTO payments (id, property_id, booking_id, guest_id, kind, method, amount_paise, account_id, reference, received_on, status, fee_expense_id, inbox_item_id, recorded_by, idempotency_key)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    pid, p.id, bookingId, guestId, kind, method, amount, accountId, optStr(x.reference, "reference"), receivedOn, method === "airpay" && !x.inbox_item_id ? "recorded" : "confirmed", feeId, optStr(x.inbox_item_id, "inbox_item_id"), actor.id, idem);
-  if (x.inbox_item_id) b.add("UPDATE inbox_items SET status = 'approved', payment_id = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ? AND property_id = ?", pid, actor.id, nowIso(), String(x.inbox_item_id), p.id);
-  b.audit("payment.create", "payment", pid, null, { booking_id: bookingId, kind, method, amount_paise: amount, account_id: accountId, fee_expense_id: feeId });
-  await b.run();
-  const balance = bookingId ? (await loadBooking(c.env.DB, p.id, bookingId)).gross_paise - (await paidOnBooking(c.env.DB, bookingId)) : null;
-  return c.json({ id: pid, kind, fee_expense_id: feeId, balance_paise: balance }, 201);
+  const res = await recordPayment(c.env.DB, actor, p, {
+    idempotency_key: optStr(x.idempotency_key, "idempotency_key"), booking_id: optStr(x.booking_id, "booking_id"), guest_id: optStr(x.guest_id, "guest_id"),
+    method: oneOf(x.method, "method", METHODS), amount_paise: paise(x.amount_paise, "amount_paise"), received_on: optStr(x.received_on, "received_on"),
+    account_id: optStr(x.account_id, "account_id"), fee_bp: x.fee_bp === undefined ? undefined : int(x.fee_bp, "fee_bp", { min: 0, max: 1000 }),
+    reference: optStr(x.reference, "reference"), inbox_item_id: optStr(x.inbox_item_id, "inbox_item_id"),
+  });
+  if (res.duplicate) return c.json({ id: res.id, duplicate: true });
+  return c.json({ id: res.id, kind: res.kind, fee_expense_id: res.fee_expense_id, balance_paise: res.balance_paise }, 201);
 });
 
 /** Void follows the payment through: its fee expense is voided in the same batch (F4). */

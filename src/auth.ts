@@ -10,7 +10,7 @@ export interface Actor {
   name: string;
   role: Role;
   /** how the caller was identified: session cookie, Cloudflare Access, or the dev header */
-  via?: "session" | "access" | "dev";
+  via?: "session" | "access" | "dev" | "automation";
   session_id?: string;
 }
 

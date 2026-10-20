@@ -78,8 +78,10 @@ describe("Lead → CA", () => {
 
   it("W1 · the inbox turns a STAAH email into an OTA booking and flags the duplicate", async () => {
     const email = { from: "noreply@staah.com", subject: "STAAH · New reservation · Booking.com", text: "Channel: Booking.com\nRef: 1060900000001336\nGuest: Astha Sharma\nRoom: Deluxe ×1\nCheck-in: 03/10/2026\nCheck-out: 04/10/2026\nRoom Total: ₹6,000.00 (ex-GST)\nCommission: 23%\nChannel Collect" };
+    // This stay is already in the past, so automation leaves it for a person (test/inbox.test.ts covers the automatic path).
     const ing = await ok("prachi", "POST", "/api/inbox/ingest", email);
     expect(ing.status).toBe("pending");
+    expect(ing.auto.note).toMatch(/in the past/);
     expect(ing.parsed.data.guest_name).toBe("Astha Sharma");
     expect(ing.parsed.data.check_out).toBe("2026-10-04");
     const appr = await ok("prachi", "POST", `/api/inbox/${ing.id}/approve`, { room_ids: ["loc_r1"] });

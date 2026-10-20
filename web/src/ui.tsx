@@ -33,7 +33,7 @@ export function Chips<T extends string>(p: { value: T | null; options: { value: 
 }
 export function Field(p: { label: ComponentChildren; children?: ComponentChildren; hint?: ComponentChildren }) { return <label class="field"><span>{p.label}</span>{p.children}{p.hint && <small>{p.hint}</small>}</label>; }
 export function Status(p: { s: string }) {
-  const tone: Record<string, string> = { new: "amb", contacted: "", quoted: "", hold: "amb", won: "ok", lost: "bad", provisional: "amb", approved: "ok", checked_in: "ok", checked_out: "", cancelled: "bad", no_show: "bad", pending: "amb", returned: "bad", auto: "muted", open: "amb", in_progress: "", done: "ok", noted: "muted", matched: "ok", proposed: "amb", unmatched: "bad", carried: "muted", locked: "ok", filed: "ok", precleared: "amb", settled: "ok", draft: "amb", undone: "bad", duplicate: "muted", routed: "muted", dismissed: "muted", void: "bad", issued: "ok", credited: "muted" };
+  const tone: Record<string, string> = { new: "amb", contacted: "", quoted: "", hold: "amb", won: "ok", lost: "bad", provisional: "amb", approved: "ok", checked_in: "ok", checked_out: "", cancelled: "bad", no_show: "bad", pending: "amb", returned: "bad", auto: "ok", open: "amb", in_progress: "", done: "ok", noted: "muted", matched: "ok", proposed: "amb", unmatched: "bad", carried: "muted", locked: "ok", filed: "ok", precleared: "amb", settled: "ok", draft: "amb", undone: "bad", duplicate: "muted", routed: "muted", dismissed: "muted", void: "bad", issued: "ok", credited: "muted" };
   return <span class={`status ${tone[p.s] ?? ""}`}>{p.s.replace(/_/g, " ")}</span>;
 }
 export function Empty(p: { children?: ComponentChildren }) { return <div class="empty">{p.children ?? "Nothing here."}</div>; }

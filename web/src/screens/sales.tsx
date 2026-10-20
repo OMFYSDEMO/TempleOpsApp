@@ -55,11 +55,13 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
   const [paste, setPaste] = useState({ from: "", subject: "", text: "" });
   const rooms = refs.locations.filter((l) => l.kind === "room");
   return <>
-    <h2>Inbox — bookings <small>W1 · STAAH, SwiftBook parsed; payment emails route to Payments</small></h2>
-    <Chips value={status} options={[{ value: "pending", label: "To review" }, { value: "approved", label: "Approved" }, { value: "duplicate", label: "Already in the books" }, { value: "dismissed", label: "Dismissed" }]} onChange={setStatus} />
+    <h2>Inbox — bookings <small>STAAH and SwiftBook emails book, cancel and record themselves when the facts line up; the rest wait here with the reason</small></h2>
+    <Chips value={status} options={[{ value: "pending", label: "Needs a person" }, { value: "approved", label: "Done · auto and approved" }, { value: "duplicate", label: "Already in the books" }, { value: "dismissed", label: "Dismissed" }]} onChange={setStatus} />
     {!q.data ? <Loading error={q.error} /> : q.data.items.length === 0 ? <Empty>Nothing to review.</Empty> : q.data.items.map((it: any) => {
       const d = it.parsed ?? {}; const sel = pick[it.id] ?? [];
-      return <Card key={it.id} title={<>{it.source} · {it.kind.replace("_", " ")} <Status s={it.status} />{d.confidence === "low" && <Status s="check parse" />}</>} sub={<>From {it.from_addr} · {it.subject}</>}>
+      return <Card key={it.id} title={<>{it.source} · {it.kind.replace("_", " ")} <Status s={it.auto_applied ? "auto" : it.status} />{d.confidence === "low" && <Status s="check parse" />}</>} sub={<>From {it.from_addr} · {it.subject}</>} tone={it.status === "pending" && it.auto_note ? "amb" : undefined}>
+        {it.status === "pending" && it.auto_note && <div class="sub" style="margin-bottom:8px"><b>Why it waited:</b> {it.auto_note}</div>}
+        {it.auto_applied === 1 && <div class="sub" style="margin-bottom:8px">Applied automatically on arrival{it.reviewed_at ? ` · ${fmtDate(it.reviewed_at.slice(0, 10))}` : ""}</div>}
         <div class="grid two"><div>
           <Row label="Guest" value={d.guest_name ?? "—"} /><Row label="Dates" value={d.check_in ? `${fmtDate(d.check_in)} → ${fmtDate(d.check_out)}` : "—"} />
           {d.channel && <Row label="Channel" value={d.channel} />}{d.room_name && <Row label="Room" value={`${d.room_name} × ${d.rooms ?? 1}`} />}
@@ -75,7 +77,7 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
         {it.booking_id && <div class="muted">Booking {it.booking_id}</div>}
       </Card>;
     })}
-    <Card title="Paste an email" sub="until Email Routing is pointed at the inbox address, paste the notification here — same parser, same audit">
+    <Card title="Paste an email" sub="forwarded mail arrives on its own once Email Routing is on; paste one here to test, or when a notification went astray — same parser, same automation, same audit">
       <div class="grid two"><Field label="From"><input value={paste.from} onInput={(e: any) => setPaste({ ...paste, from: e.currentTarget.value })} placeholder="noreply@staah.com" /></Field><Field label="Subject"><input value={paste.subject} onInput={(e: any) => setPaste({ ...paste, subject: e.currentTarget.value })} /></Field></div>
       <Field label="Body (text)"><textarea rows={6} value={paste.text} onInput={(e: any) => setPaste({ ...paste, text: e.currentTarget.value })} /></Field>
       <div class="actions end"><Btn kind="primary" onClick={() => run(async () => { await post("/inbox/ingest", paste); setPaste({ from: "", subject: "", text: "" }); setStatus("pending"); await q.reload(); }, "Ingested")}>Ingest</Btn></div></Card>

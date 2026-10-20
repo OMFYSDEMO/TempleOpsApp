@@ -11,7 +11,7 @@ Pilot property: Meadows Varkala (4 rooms). Every table carries `property_id`, so
 | API | Cloudflare Workers · [Hono](https://hono.dev) · TypeScript |
 | Books | D1 (SQLite). Money is integer paise. Multi-row writes are one `batch()` (one transaction). |
 | Files | R2 (bill photos, invoice PDFs, month-close packs) served only through the role-checked API |
-| Inbox | Email Routing → Email Worker (`postal-mime`) parses STAAH / SwiftBook / Airpay mail |
+| Inbox | Email Routing → Email Worker (`postal-mime`) parses STAAH / SwiftBook / Airpay mail; confident, consistent emails book, cancel and record payments on arrival, the rest wait with a reason |
 | Nudges | Cron Trigger every 5 min: hold & quote expiry, 15/60-minute lead nudges |
 | Auth | AVOS's own email + password login (PBKDF2, D1 sessions, secure cookie, lockout, forced change, reset links); Cloudflare Access accepted as an optional second layer. Role walls are enforced per API route. |
 | UI | Preact + Vite PWA served as Worker static assets; quick capture is offline-first with idempotency keys |
