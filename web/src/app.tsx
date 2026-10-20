@@ -14,7 +14,7 @@ export interface Ref { locations: any[]; channels: any[]; accounts: any[]; users
 type Screen = { key: string; label: string; cap: string; group: string; comp: (p: { me: Me; refs: Ref }) => any; mobile?: boolean; icon: string };
 const SCREENS: Screen[] = [
   { key: "leads", label: "Leads", cap: "leads", group: "Sales", comp: Leads, mobile: true, icon: "leads" },
-  { key: "inbox", label: "Inbox — bookings", cap: "inbox", group: "Sales", comp: Inbox, icon: "inbox" },
+  { key: "inbox", label: "Inbox — bookings", cap: "inbox", group: "Sales", comp: Inbox, mobile: true, icon: "inbox" },
   { key: "resv", label: "Reservations", cap: "bookings_write", group: "Sales", comp: Reservations, mobile: true, icon: "calendar" },
   { key: "avail", label: "Availability", cap: "bookings_read", group: "Sales", comp: Availability, icon: "grid" },
   { key: "desk", label: "Front desk", cap: "frontdesk", group: "Property", comp: FrontDesk, mobile: true, icon: "key" },
