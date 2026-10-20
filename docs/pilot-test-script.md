@@ -1,8 +1,8 @@
 # AVOS pilot test script — all five roles, one stay, Lead → CA
 
-Run this once, in order, on the live site <https://avos.shajianandan.com>. Each block says who signs in, what to do, and what you should see. The whole run takes about 25 minutes. Use a phone for Sindhu's part; the + button is built for it.
+Run this once, in order, on the live site <https://app.shajianandan.com>. Each block says who signs in, what to do, and what you should see. The whole run takes about 25 minutes. Use a phone for Sindhu's part; the + button is built for it.
 
-Login: enter your email on the Access page, paste the one-time PIN from the mail. If Access says you are not allowed, your email is missing from the application's policy (Zero Trust → Access controls → Applications → `avos.shajianandan.com` → policy). If AVOS says *no active user for …*, the email differs from the one in Settings & users; the owner fixes it there.
+Login: enter your email on the Access page, paste the one-time PIN from the mail. If Access says you are not allowed, your email is missing from the application's policy (Zero Trust → Access controls → Applications → `app.shajianandan.com` → policy). If AVOS says *no active user for …*, the email differs from the one in Settings & users; the owner fixes it there.
 
 Before starting, the owner should check **Settings & users** once: five users, four rooms, tariff card, Booking.com terms.
 
@@ -30,7 +30,7 @@ Expected menu: Leads, Inbox — bookings, Reservations, Availability. **No** Das
    Channel Collect
    ```
    Ingest → the card shows the parsed fields → tick **Superior** → **Approve**. Reservations now lists a Booking.com stay, approved.
-7. Try the wall: open <https://avos.shajianandan.com/api/reports/pnl> in the same browser. Expect a JSON error with *may not use pnl_reports* (HTTP 403).
+7. Try the wall: open <https://app.shajianandan.com/api/reports/pnl> in the same browser. Expect a JSON error with *may not use pnl_reports* (HTTP 403).
 
 ## 2. Trupti · revenue (trupti@truvic.co.in)
 

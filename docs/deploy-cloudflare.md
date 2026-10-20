@@ -2,7 +2,7 @@
 
 Everything runs in one Cloudflare account: a Worker (API + web app + email handler + cron), a D1 database, an R2 bucket, Cloudflare Access for logins and Email Routing for the inbox. Budget about an hour the first time. Steps 1–7 are the minimum for a working pilot; 8–10 switch on the inbox, lead hooks and backups.
 
-The app's hostname is `avos.shajianandan.com`. Replace `YOUR-DOMAIN` below with the domain you use for inbound email (step 8) and `YOUR-TEAM` with the Zero Trust team name you pick in step 6.
+The app's hostname is `app.shajianandan.com` (`avos.shajianandan.com` was the pilot address; a leftover Cloudflare Access application still intercepts it while Cloudflare's Access API is down, so it is kept in the config but not used). Replace `YOUR-DOMAIN` below with the domain you use for inbound email (step 8) and `YOUR-TEAM` with the Zero Trust team name you pick in step 6.
 
 ---
 
@@ -64,7 +64,7 @@ This builds the web app and deploys the Worker as `avos` to `https://avos.<your-
 
 ## 5. Attach your own hostname
 
-**Done on 19 Oct 2026:** the app answers on `https://avos.shajianandan.com`. The hostname is declared in `wrangler.jsonc` (`env.production.routes`) so every deploy keeps it, and the post-deploy smoke test runs against it.
+**Done on 19 Oct 2026:** the app answers on `https://app.shajianandan.com`. The hostname is declared in `wrangler.jsonc` (`env.production.routes`) so every deploy keeps it, and the post-deploy smoke test runs against it.
 
 1. **Workers & Pages → avos → Settings → Domains & Routes → Add → Custom Domain**.
 2. Enter the hostname and select **Add domain**. Cloudflare creates the DNS record and certificate.
@@ -80,11 +80,11 @@ This builds the web app and deploys the Worker as `avos` to `https://avos.<your-
 - The owner opens **Settings & users** and either **Set password** (a temporary one, which the person must change at first sign-in) or **Password link** (a one-time link valid 72 hours, sent by WhatsApp or mail).
 - **Forgot password?** on the sign-in screen emails a reset link once Email Sending is configured (`send_email` binding and `EMAIL_FROM` in `wrangler.jsonc`, domain onboarded under Compute → Email Service). Until then it tells the person to ask the owner for a link.
 
-**Switching Access off** (so the AVOS sign-in screen is what people see): Zero Trust → Access controls → Applications → the `avos.shajianandan.com` application → Delete. Leaving `ACCESS_TEAM_DOMAIN` set is harmless. If you prefer both layers, keep the application: Access signs people in first, and AVOS recognises the Access identity without asking for a password.
+**Switching Access off** (so the AVOS sign-in screen is what people see): Zero Trust → Access controls → Applications → the `app.shajianandan.com` application → Delete. Leaving `ACCESS_TEAM_DOMAIN` set is harmless. If you prefer both layers, keep the application: Access signs people in first, and AVOS recognises the Access identity without asking for a password.
 
 ### 6a. Cloudflare Access (optional second layer, the original step 6)
 
-**Done on 19 Oct 2026:** the account's existing Zero Trust team is `kshetrom` (team domain `kshetrom.cloudflareaccess.com`) and an Access application protects `avos.shajianandan.com`. The Worker pins that team domain in `env.production.vars.ACCESS_TEAM_DOMAIN`; `ACCESS_AUD` is optional and blank. Still to do when the lead hooks go live (step 9): a second self-hosted application on `avos.shajianandan.com` with paths `hooks` and `api/health` and a **Bypass** policy for Everyone, otherwise webhooks are sent to the login page.
+**Done on 19 Oct 2026:** the account's existing Zero Trust team is `kshetrom` (team domain `kshetrom.cloudflareaccess.com`) and an Access application protects `app.shajianandan.com`. The Worker pins that team domain in `env.production.vars.ACCESS_TEAM_DOMAIN`; `ACCESS_AUD` is optional and blank. Still to do when the lead hooks go live (step 9): a second self-hosted application on `app.shajianandan.com` with paths `hooks` and `api/health` and a **Bypass** policy for Everyone, otherwise webhooks are sent to the login page.
 
 Access gives you Google / one-time-PIN logins for up to 50 users at no cost, and the Worker trusts only the signed token Access adds to each request.
 

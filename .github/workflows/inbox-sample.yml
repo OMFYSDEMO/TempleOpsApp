@@ -1,0 +1,45 @@
+# Diagnostic: print the text of an email the inbox stored in R2, so a parser can be tuned on the real template.
+# Phone numbers and email addresses are masked in the output.
+name: Inbox email sample
+on:
+  workflow_dispatch:
+    inputs:
+      key:
+        description: R2 key of the stored email (inbox_items.raw_key)
+        required: true
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --legacy-peer-deps
+      - name: Download the stored email
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          KEY: ${{ github.event.inputs.key }}
+        run: npx wrangler r2 object get "avos-files/$KEY" --file sample.eml --remote
+      - name: Print the parts, masked
+        run: |
+          python3 - <<'PY'
+          import email, re
+          from email import policy
+          m = email.message_from_bytes(open("sample.eml", "rb").read(), policy=policy.default)
+          mask = lambda s: re.sub(r"\+?\d[\d \-]{8,}\d", "<phone>", re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "<email>", s))
+          print("Subject:", mask(m["subject"] or ""))
+          print("From:", mask(m["from"] or ""))
+          for part in m.walk():
+            ct = part.get_content_type()
+            if ct in ("text/plain", "text/html"):
+              body = part.get_content()
+              if ct == "text/html":
+                body = re.sub(r"<style[\s\S]*?</style>|<script[\s\S]*?</script>", "", body)
+                body = re.sub(r"<br\s*/?>|</(p|div|tr|li|h\d|td)>", "\n", body)
+                body = re.sub(r"<[^>]+>", " ", body)
+                body = body.replace("&nbsp;", " ").replace("&amp;", "&")
+              body = re.sub(r"[ \t]+", " ", body); body = re.sub(r"\n\s*\n+", "\n", body)
+              print(f"===== {ct} ({len(body)} chars) =====")
+              print(mask(body)[:6000])
+          PY
