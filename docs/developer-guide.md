@@ -40,6 +40,7 @@ Locally there is no login wall: send the header `x-dev-user: <email of a seeded 
 - `web/src/api.ts` is the fetch wrapper (`get`, `post`, `patch`, `del`); `web/src/offline.ts` queues writes when offline.
 - `web/src/ui.tsx` holds the small component kit (Card, Row, Btn, Chips, Field, Status, Keypad, `useLoad`, `run`, `toast`) and formatting (`inr`, `fmtDate`).
 - `web/src/screens/` one file per area: `sales.tsx` (leads, inbox, reservations, availability), `property.tsx` (front desk, payments, invoices, tasks, expenses), `management.tsx` (approvals, payouts, reconcile, reports, dashboard, admin, close, GST, audit), `ids.tsx` (guest IDs, Form C, Drive settings), `auth.tsx`.
+- Money accounts: `defaultBank()` / `bankAccount()` in `src/db.ts`; owner CRUD under `/api/admin/accounts`; `BankPick` in `web/src/ui.tsx` renders only when there is more than one bank.
 - Guest IDs: `src/routes/ids.ts` (capture, view, Form C), `src/services/drive.ts` (Google OAuth, Drive client, the 48-hour archive run from `src/cron.ts`); process and setup in `docs/guest-ids.md`.
 
 ## Adding a feature, the usual shape
