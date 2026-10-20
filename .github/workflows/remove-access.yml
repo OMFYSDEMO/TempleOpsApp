@@ -26,6 +26,8 @@ jobs:
         run: |
           set -euo pipefail
           api() { curl -sS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "$@"; }
+          show() { # print a JSON summary, or the raw start of a non-JSON reply (gateway errors come back as text/html)
+            local body="$1" filter="$2"; if echo "$body" | jq -e . >/dev/null 2>&1; then echo "$body" | jq -c "$filter"; else echo "non-JSON reply: $(echo "$body" | head -c 300 | tr '\n' ' ')"; fi; }
           if [ -z "$ACCOUNT" ]; then
             ACCOUNT=$(api https://api.cloudflare.com/client/v4/accounts | jq -r '.result[0].id // empty')
             [ -n "$ACCOUNT" ] || { echo "::error::could not determine the account: set the CLOUDFLARE_ACCOUNT_ID secret"; exit 1; }
@@ -43,8 +45,6 @@ jobs:
             echo "::error::the token cannot list Access applications; grant it 'Access: Apps and Policies → Edit' or remove the application in Zero Trust → Access → Applications"
             exit 1
           fi
-          show() { # print a JSON summary, or the raw start of a non-JSON reply (gateway errors come back as text/html)
-            local body="$1" filter="$2"; if echo "$body" | jq -e . >/dev/null 2>&1; then echo "$body" | jq -c "$filter"; else echo "non-JSON reply: $(echo "$body" | head -c 300 | tr '\n' ' ')"; fi; }
           echo "Zero Trust organisation of this account:"; show "$(api -m 60 "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/organization")" '{success, auth_domain: .result.auth_domain, name: .result.name, errors}'
           zone=$(api "https://api.cloudflare.com/client/v4/zones?name=${DOMAIN#*.}" | jq -r '.result[0].id // empty')
           echo "Zone for ${DOMAIN#*.}: ${zone:-not visible to this token}"
