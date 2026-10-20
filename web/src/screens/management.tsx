@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { get, post, patch, del } from "../api";
 import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, inr, fmtDate, fmtDateTime, useLoad, run, toast, thisPeriod , CategoryPicker } from "../ui";
+import { DriveSettings } from "./ids";
 import { catLabel, type Me, type Ref } from "../app";
 
 export function Approvals({ me }: { me: Me; refs: Ref }) {
@@ -166,6 +167,7 @@ export function Admin({ refs }: { me: Me; refs: Ref }) {
       <Card title="Tariff card" sub="per room; a dated card with higher priority overrides the standard rate">{refs.locations.filter((l) => l.kind === "room").map((r) => <div key={r.id}><b>{r.name}</b>{refs.rate_cards.filter((c) => c.room_id === r.id).map((c) => <div className="row" key={c.id}><div>{c.name}{c.from_date ? ` · ${fmtDate(c.from_date)} → ${fmtDate(c.to_date)}` : " · always"} · p{c.priority}</div><div className="actions"><b className="num">{inr(c.rate_paise)}</b><Btn small kind="danger" onClick={() => run(async () => { await del(`/admin/rate-cards/${c.id}`); location.reload(); }, "Removed")}>×</Btn></div></div>)}</div>)}
         <details><summary>Add card</summary><Field label="Room"><select value={rc.room_id} onChange={(e: any) => setRc({ ...rc, room_id: e.currentTarget.value })}>{refs.locations.filter((l) => l.kind === "room").map((r) => <option value={r.id}>{r.name}</option>)}</select></Field><div className="grid two"><Field label="Name"><input value={rc.name} onChange={(e: any) => setRc({ ...rc, name: e.currentTarget.value })} /></Field><Field label="Rate ex-GST (₹)"><input inputMode="decimal" value={rc.rate} onChange={(e: any) => setRc({ ...rc, rate: e.currentTarget.value })} /></Field><Field label="From"><input type="date" value={rc.from_date} onChange={(e: any) => setRc({ ...rc, from_date: e.currentTarget.value })} /></Field><Field label="To"><input type="date" value={rc.to_date} onChange={(e: any) => setRc({ ...rc, to_date: e.currentTarget.value })} /></Field></div><div className="actions end"><Btn kind="primary" onClick={() => run(async () => { await post("/admin/rate-cards", { room_id: rc.room_id, name: rc.name, rate_paise: Math.round(Number(rc.rate) * 100), from_date: rc.from_date || null, to_date: rc.to_date || null, priority: rc.priority }); location.reload(); }, "Card added")}>Add</Btn></div></details></Card>
     </div>
+  <DriveSettings />
   </>;
 }
 function ChannelEdit({ c }: { c: any }) {

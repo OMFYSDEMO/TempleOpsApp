@@ -133,6 +133,15 @@ table.bookings tbody tr { cursor: pointer; } table.bookings tbody tr.open { back
 .roomchips { display: inline-flex; flex-wrap: wrap; gap: 4px; } .roomchips i { font-style: normal; font-size: 11px; font-weight: 650; background: var(--line2); color: var(--ink); border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
 .amend { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 
+/* ---------- Guest IDs ---------- */
+.idhead { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: flex-start; margin-bottom: 12px; } .idhead .formc { flex: 1 1 320px; }
+.capture { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.docgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.doc { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--card); display: flex; flex-direction: column; }
+.doc img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--paper); } .doc .pdf { display: grid; place-items: center; aspect-ratio: 4 / 3; background: var(--paper); color: var(--muted); font-weight: 650; }
+.doc .meta { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; flex: 1; } .doc .meta b { font-size: 13px; } .doc .btn { margin: 0 10px 10px; align-self: flex-start; }
+.note { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 10px; } .note.bad { background: var(--badbg); color: var(--bad); border-color: transparent; } .note code { display: block; margin-top: 6px; font-size: 12px; user-select: all; }
+
 /* ---------- Mobile: the sidebar slides in from the menu button, as in the kit ---------- */
 @media (max-width: 850px) {
   .topbar { padding: 0 14px; gap: 10px; } .topbar .where { display: none; } .topbar .mbrand span.txt { display: none; }

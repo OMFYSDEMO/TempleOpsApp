@@ -15,4 +15,6 @@ export interface Env {
   APP_URL?: string;             // public base URL used in password links, e.g. https://avos.shajianandan.com
   EMAIL?: { send(msg: { from: string; to: string; subject: string; text: string; html?: string }): Promise<unknown> }; // Cloudflare Email Sending binding (optional)
   EMAIL_FROM?: string;          // verified sender, e.g. avos@shajianandan.com
+  GOOGLE_CLIENT_ID?: string;    // OAuth web client for the Drive ID archive (secret)
+  GOOGLE_CLIENT_SECRET?: string; // its client secret (secret)
 }

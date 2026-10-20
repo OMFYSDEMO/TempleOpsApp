@@ -5,6 +5,9 @@ import { CAN } from "../auth";
 import { todayIn } from "../domain/dates";
 import { setPassword, createPasswordLink } from "./auth";
 import { EXPENSE_CATEGORIES, EXPENSE_FAMILIES, COMMON_PETTY, COMMON_BANK } from "../domain/expenseCategories";
+import { randomToken, cookieValue, sessionCookie } from "../auth";
+import { driveConfigured, driveConsentUrl, driveRedirectUri, exchangeCode, driveIntegration, googleDrive, DRIVE_ROOT_FOLDER, runIdArchive } from "../services/drive";
+import { nowIso } from "../domain/dates";
 
 const r = newRouter();
 
@@ -177,6 +180,51 @@ admin.patch("/channels/:id", async (c) => {
   await b.run();
   return c.json({ ok: true });
 });
+// ---- Integrations: Google Drive for the guest-ID archive (owner connects their own Google account once) ----
+const DRIVE_STATE_COOKIE = "avos_drive_state";
+admin.get("/integrations/google-drive", async (c) => {
+  const row = await driveIntegration(c.env.DB, c.get("property").id);
+  const origin = new URL(c.req.url).origin;
+  return c.json({ configured: driveConfigured(c.env), redirect_uri: driveRedirectUri(c.env, origin), connected: !!row, account_email: row?.account_email ?? null, folder_link: row?.folder_link ?? null, connected_at: row?.connected_at ?? null, last_used_at: row?.last_used_at ?? null, last_error: row?.last_error ?? null });
+});
+/** Start the consent flow: the browser follows the returned URL to Google and comes back to the callback below. */
+admin.post("/integrations/google-drive/connect", async (c) => {
+  if (!driveConfigured(c.env)) throw new HttpError(409, "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set on the Worker yet");
+  const state = randomToken(16);
+  c.header("set-cookie", sessionCookie(state, c.req.raw, 600).replace(/^avos_session=/, `${DRIVE_STATE_COOKIE}=`));
+  return c.json({ url: driveConsentUrl(c.env, new URL(c.req.url).origin, state) });
+});
+admin.get("/integrations/google-drive/callback", async (c) => {
+  const p = c.get("property"); const actor = c.get("actor");
+  const q = c.req.query();
+  const back = (msg: string) => c.redirect(`/#admin?drive=${encodeURIComponent(msg)}`, 302);
+  if (q.error) return back(`Google said: ${q.error}`);
+  if (!q.code || !q.state || q.state !== cookieValue(c.req.raw, DRIVE_STATE_COOKIE)) return back("the sign-in did not come back the way it left; try Connect again");
+  try {
+    const tok = await exchangeCode(c.env, new URL(c.req.url).origin, q.code);
+    const root = await googleDrive(tok.access_token).ensureFolder(DRIVE_ROOT_FOLDER, null);
+    const b = new Batch(c.env.DB, actor);
+    b.add("INSERT INTO integrations (property_id, kind, account_email, refresh_token, folder_id, folder_link, connected_by, connected_at, last_error) VALUES (?,?,?,?,?,?,?,?,NULL) ON CONFLICT(property_id, kind) DO UPDATE SET account_email = excluded.account_email, refresh_token = excluded.refresh_token, folder_id = excluded.folder_id, folder_link = excluded.folder_link, connected_by = excluded.connected_by, connected_at = excluded.connected_at, last_error = NULL",
+      p.id, "google_drive", tok.email, tok.refresh_token, root.id, root.link, actor.id, nowIso());
+    b.audit("integration.connect", "integration", "google_drive", null, { account_email: tok.email, folder_id: root.id });
+    await b.run();
+    return back("connected");
+  } catch (e) { return back(String((e as Error).message)); }
+});
+admin.delete("/integrations/google-drive", async (c) => {
+  const p = c.get("property"); const actor = c.get("actor");
+  const b = new Batch(c.env.DB, actor);
+  b.add("DELETE FROM integrations WHERE property_id = ? AND kind = 'google_drive'", p.id);
+  b.audit("integration.disconnect", "integration", "google_drive", null, null);
+  await b.run();
+  return c.json({ ok: true });
+});
+/** Run the archive step now rather than waiting for the next cron tick (still only stays past the 48-hour mark). */
+admin.post("/integrations/google-drive/archive-now", async (c) => {
+  const r = await runIdArchive(c.env, c.get("property"), nowIso());
+  return c.json(r);
+});
+
 r.route("/admin", admin);
 
 export default r;

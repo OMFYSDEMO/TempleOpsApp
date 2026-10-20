@@ -142,7 +142,8 @@ r.get("/frontdesk/today", requireCap("frontdesk"), async (c) => {
   const today = c.req.query("date") ?? todayIn(p.timezone);
   const sql = (where: string) => `SELECT b.id, b.status, b.check_in, b.check_out, b.gross_paise, b.external_ref, g.name AS guest_name, g.phone AS guest_phone, ch.name AS channel_name, ch.collection_type,
       (SELECT GROUP_CONCAT(l.name, ', ') FROM booking_rooms br JOIN locations l ON l.id = br.room_id WHERE br.booking_id = b.id) AS room_names,
-      (SELECT COALESCE(SUM(CASE WHEN kind='refund' THEN -amount_paise ELSE amount_paise END),0) FROM payments WHERE booking_id = b.id AND status != 'void') AS paid_paise
+      (SELECT COALESCE(SUM(CASE WHEN kind='refund' THEN -amount_paise ELSE amount_paise END),0) FROM payments WHERE booking_id = b.id AND status != 'void') AS paid_paise,
+      (SELECT COUNT(*) FROM guest_documents d WHERE d.booking_id = b.id AND d.deleted_at IS NULL) AS doc_count, b.guest_nationality, b.form_c_status
      FROM bookings b JOIN guests g ON g.id = b.guest_id JOIN channels ch ON ch.id = b.channel_id WHERE b.property_id = ? AND ${where} ORDER BY b.check_in`;
   const [arrivals, departures, inHouse] = await Promise.all([
     all(c.env.DB, sql("b.check_in = ? AND b.status IN ('approved','provisional')"), p.id, today),

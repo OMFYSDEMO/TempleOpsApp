@@ -3,12 +3,13 @@ import { get, post, patch, uploadFile } from "../api";
 import { submit, readQueue, onQueueChange, dropQueued, flush } from "../offline";
 import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, Keypad, inr, fmtDate, useLoad, run, toast, todayIso, thisPeriod , CategoryPicker } from "../ui";
 import { catLabel, type Me, type Ref } from "../app";
+import { idsHref } from "./ids";
 
 export function FrontDesk({ }: { me: Me; refs: Ref }) {
   const q = useLoad(() => get("/bookings/frontdesk/today"), []);
   const [result, setResult] = useState<any>(null);
   const act = (id: string, verb: string, msg: string) => run(async () => { const r = await post(`/bookings/${id}/${verb}`); setResult(verb === "check-out" ? { id, ...r } : null); await q.reload(); }, msg);
-  const List = ({ title, rows, verb, label }: any) => <Card title={title}>{rows.length === 0 ? <Empty>None today.</Empty> : rows.map((b: any) => <div className="row" key={b.id}><div><div>{b.guest_name} · {b.room_names}</div><div className="sub">{b.channel_name} · {b.collection_type === "channel_collect" ? "OTA collect — nothing to take" : b.paid_paise >= b.gross_paise ? "paid ✓" : `balance ${inr(b.gross_paise - b.paid_paise)}`} · {fmtDate(b.check_in)}→{fmtDate(b.check_out)}</div></div><div className="actions"><Status s={b.status} />{verb && <Btn small kind="primary" onClick={() => act(b.id, verb, label + " ✓")}>{label}</Btn>}{verb === "check-in" && <Btn small kind="danger" onClick={() => act(b.id, "no-show", "No-show recorded")}>No-show</Btn>}</div></div>)}</Card>;
+  const List = ({ title, rows, verb, label }: any) => <Card title={title}>{rows.length === 0 ? <Empty>None today.</Empty> : rows.map((b: any) => <div className="row" key={b.id}><div><div>{b.guest_name} · {b.room_names}</div><div className="sub">{b.channel_name} · {b.collection_type === "channel_collect" ? "OTA collect — nothing to take" : b.paid_paise >= b.gross_paise ? "paid ✓" : `balance ${inr(b.gross_paise - b.paid_paise)}`} · {fmtDate(b.check_in)}→{fmtDate(b.check_out)}</div></div><div className="actions"><Status s={b.status} /><a className={`btn small${b.doc_count ? "" : " gold"}`} href={idsHref(b.id)}>{b.doc_count ? `ID ✓ ${b.doc_count}` : "ID proof"}</a>{verb && <Btn small kind="primary" onClick={() => act(b.id, verb, label + " ✓")}>{label}</Btn>}{verb === "check-in" && <Btn small kind="danger" onClick={() => act(b.id, "no-show", "No-show recorded")}>No-show</Btn>}</div></div>)}</Card>;
   if (!q.data) return <Loading error={q.error} />;
   return <>
     <h2>Front desk <small>{fmtDate(q.data.date)} · one-tap check-in/out</small></h2>

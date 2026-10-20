@@ -1,5 +1,5 @@
 import type { Env } from "../env";
-import { Batch, all, type PropertyRow } from "../db";
+import { Batch, all, one, type PropertyRow } from "../db";
 import { nowIso, todayIn, previousPeriod, periodOf } from "../domain/dates";
 import { notifyRole } from "./notify";
 
@@ -23,6 +23,7 @@ export const TOLERANCE: Record<string, number> = {
   arrival: 4, departure: 4, overstay: 1, task: 24,
   approval: 4, payout: 7 * 24, bank: 7 * 24,
   lock: 72, file: 72,
+  idproof: 2, formc: 24, idarchive: 72,
 };
 
 const hoursBetween = (a: string, b: string) => Math.max(0, (Date.parse(b) - Date.parse(a)) / 3_600_000);
@@ -54,6 +55,15 @@ export async function allWorkItems(db: D1Database, p: PropertyRow, now = nowIso(
     const due = r.gross_paise - r.paid;
     if (r.check_out < today) out.push(item("overstay", `overstay:${r.id}`, `${r.name} was due out ${r.check_out} · still checked in`, due > 0 ? `balance ₹${(due / 100).toLocaleString("en-IN")}` : null, "property", localIso(r.check_out, "11:00"), "#desk", now));
     else if (due > 0) out.push(item("departure", `departure:${r.id}`, `${r.name} leaves today · balance ₹${(due / 100).toLocaleString("en-IN")} to collect`, null, "property", localIso(r.check_out, "08:00"), "#desk", now));
+  }
+  // Guest IDs: a checked-in stay with no document yet; Form C open on a foreign stay; finished stays whose IDs cannot archive because Drive is not connected.
+  for (const r of await all<any>(db, "SELECT b.id, b.checked_in_at, g.name FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.status = 'checked_in' AND NOT EXISTS (SELECT 1 FROM guest_documents d WHERE d.booking_id = b.id AND d.deleted_at IS NULL) ORDER BY b.checked_in_at", p.id))
+    out.push(item("idproof", `idproof:${r.id}`, `${r.name} · no ID proof on file`, "photograph Aadhaar / passport / licence", "property", r.checked_in_at, "#ids", now));
+  for (const r of await all<any>(db, "SELECT b.id, b.check_in, b.checked_in_at, g.name FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.form_c_status = 'due' AND b.status NOT IN ('cancelled','no_show') ORDER BY b.check_in", p.id))
+    out.push(item("formc", `formc:${r.id}`, `${r.name} · Form C to file (foreign national)`, "FRRO portal within 24 h of arrival; record the acknowledgement", "sales", r.checked_in_at ?? localIso(r.check_in, "14:00"), "#ids", now));
+  {
+    const w = await one<{ n: number; oldest: string | null }>(db, "SELECT COUNT(*) AS n, MIN(COALESCE(b.checked_out_at, b.updated_at)) AS oldest FROM bookings b WHERE b.property_id = ? AND b.status IN ('checked_out','cancelled','no_show') AND b.ids_archived_at IS NULL AND EXISTS (SELECT 1 FROM guest_documents d WHERE d.booking_id = b.id AND d.deleted_at IS NULL AND d.r2_key IS NOT NULL)", p.id);
+    if (w && w.n > 0 && w.oldest) out.push(item("idarchive", "idarchive", `${w.n} finished stay${w.n > 1 ? "s" : ""} with ID documents waiting to archive`, "they move to Google Drive 48 h after the stay; connect Drive under Settings if this keeps waiting", "owner", new Date(Date.parse(w.oldest.replace(" ", "T") + (w.oldest.includes("+") || w.oldest.endsWith("Z") ? "" : "Z")) + 48 * 3_600_000).toISOString(), "#ids", now));
   }
   for (const r of await all<any>(db, "SELECT t.id, t.title, t.kind, t.priority, t.created_at, t.due_on, l.name AS loc FROM tasks t JOIN locations l ON l.id = t.location_id WHERE t.property_id = ? AND t.status IN ('open','in_progress') ORDER BY t.created_at", p.id))
     out.push(item("task", `task:${r.id}`, `${r.title} · ${r.loc}`, `${r.kind}${r.priority === "high" ? " · high priority" : ""}${r.due_on ? ` · due ${r.due_on}` : ""}`, "property", r.created_at, "#tasks", now));

@@ -140,6 +140,9 @@ export const CAN: Record<string, Role[]> = {
   gst: ["accountant", "owner"],
   admin: ["owner"],
   audit: ["owner", "accountant", "revenue"],
+  ids_capture: ["property", "owner"],
+  ids_view: ["sales", "property", "revenue", "owner"],
+  form_c: ["sales", "revenue", "owner"],
 };
 
 export function allowed(actor: Actor, cap: keyof typeof CAN): boolean {

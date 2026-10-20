@@ -65,6 +65,7 @@ jobs:
       #   HOOK_SECRET      — key in the lead-hook URLs and the Meta webhook verify token (any long random string)
       #   META_APP_SECRET  — Meta app → App settings → Basic → App secret
       #   META_PAGE_TOKEN  — long-lived Page access token with leads_retrieval, pages_show_list, pages_manage_metadata
+      #   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET — Google Cloud OAuth web client for the guest-ID archive to Drive
       # Each one present is pushed to the Worker on every deploy; absent ones are left as they are.
       - name: Sync Worker secrets
         env:
@@ -73,8 +74,10 @@ jobs:
           HOOK_SECRET: ${{ secrets.HOOK_SECRET }}
           META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
           META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
-          for name in HOOK_SECRET META_APP_SECRET META_PAGE_TOKEN; do
+          for name in HOOK_SECRET META_APP_SECRET META_PAGE_TOKEN GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET; do
             val="${!name}"
             if [ -n "$val" ]; then printf '%s' "$val" | npx wrangler secret put "$name" --env production >/dev/null && echo "$name: set"; else echo "$name: not provided, unchanged"; fi
           done

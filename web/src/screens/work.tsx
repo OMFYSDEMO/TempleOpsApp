@@ -9,7 +9,7 @@ function age(h: number): string {
   if (h < 48) return `${Math.round(h)} h`;
   return `${Math.round(h / 24)} d`;
 }
-const KIND_LABEL: Record<string, string> = { inbox: "Inbox", lead: "Lead", receipt: "Receipt", arrival: "Arrival", departure: "Departure", overstay: "Overstay", task: "Task", approval: "Approval", payout: "OTA payout", bank: "Bank line", lock: "Month lock", file: "GST filing" };
+const KIND_LABEL: Record<string, string> = { inbox: "Inbox", lead: "Lead", receipt: "Receipt", arrival: "Arrival", departure: "Departure", overstay: "Overstay", task: "Task", approval: "Approval", payout: "OTA payout", bank: "Bank line", lock: "Month lock", file: "GST filing", idproof: "ID proof", formc: "Form C", idarchive: "ID archive" };
 
 function Item({ it, raised }: { it: any; raised?: boolean }) {
   return <div className="row">

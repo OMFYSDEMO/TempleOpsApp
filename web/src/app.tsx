@@ -6,6 +6,7 @@ import { Leads, Inbox, Reservations, Availability } from "./screens/sales";
 import { FrontDesk, Payments, Invoices, Tasks, Expenses, QuickCapture } from "./screens/property";
 import { Approvals, Payouts, Reconcile, RevenueOverview, OwnerDashboard, BankExpenses, Admin, MonthClose, GstSheet, AuditLog } from "./screens/management";
 import { MyWork } from "./screens/work";
+import { GuestIds } from "./screens/ids";
 import { Login, ResetPassword, ChangePassword } from "./screens/auth";
 import { Icon } from "./icons";
 
@@ -21,6 +22,7 @@ const SCREENS: Screen[] = [
   { key: "resv", label: "Reservations", cap: "bookings_write", group: "Sales", comp: Reservations, mobile: true, icon: "calendar" },
   { key: "avail", label: "Availability", cap: "bookings_read", group: "Sales", comp: Availability, icon: "grid" },
   { key: "desk", label: "Front desk", cap: "frontdesk", group: "Property", comp: FrontDesk, mobile: true, icon: "key" },
+  { key: "ids", label: "Guest IDs", cap: "ids_view", group: "Property", comp: GuestIds, mobile: true, icon: "file" },
   { key: "pay", label: "Payments", cap: "payments", group: "Property", comp: Payments, mobile: true, icon: "banknote" },
   { key: "invoice", label: "Guest invoices", cap: "invoices", group: "Property", comp: Invoices, icon: "file" },
   { key: "tasks", label: "Tasks", cap: "tasks", group: "Property", comp: Tasks, mobile: true, icon: "tasks" },
@@ -66,7 +68,7 @@ export function App() {
   if (!me || !ref) return <div className="empty">Loading…</div>;
   if (me.must_change_password || changePw) return <><ChangePassword forced={!!me.must_change_password} hasPassword={!!me.has_password} onDone={() => { setChangePw(false); load(); }} /><Toaster /></>;
   const visible = SCREENS.filter((s) => me.capabilities.includes(s.cap));
-  const current = visible.find((s) => s.key === hash) ?? visible[0];
+  const current = visible.find((s) => s.key === hash.split("?")[0]) ?? visible[0];
   const groups = [...new Set(visible.map((s) => s.group))];
   const openNotifs = async () => { setNotifOpen(true); const r = await get("/notifications"); setNotifs(r.notifications); await post("/notifications/read"); setMe({ ...me, unread_notifications: 0 }); };
   const Comp = current.comp;

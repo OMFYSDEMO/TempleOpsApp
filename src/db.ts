@@ -11,7 +11,7 @@ export type Stmt = D1PreparedStatement;
 export interface PropertyRow {
   id: string; name: string; legal_name: string | null; address: string | null; gstin: string | null; state_code: string | null;
   timezone: string; fy_start_month: number; invoice_prefix: string;
-  gst_nil_upto_paise: number; gst_threshold_paise: number; gst_rate_below_bp: number; gst_rate_above_bp: number;
+  gst_nil_upto_paise: number;  gst_threshold_paise: number; gst_rate_below_bp: number; gst_rate_above_bp: number;
   auto_approve_on_tariff: number; auto_approve_max_rooms: number;
   quote_valid_hours: number; hold_hours: number; lead_nudge_minutes: number; lead_escalate_minutes: number;
   recon_fee_tolerance_bp: number; recon_subset_tolerance_bp: number;
