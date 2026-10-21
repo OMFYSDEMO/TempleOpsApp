@@ -194,3 +194,21 @@ describe("booking engine · whole villa", () => {
     expect(card.nightly_rate_paise).toBe(2000000);
   });
 });
+
+describe("booking engine · cancellation of a stay still awaiting approval", () => {
+  beforeAll(seed);
+  it("closes the pending rate approval along with the booking", async () => {
+    const mail = (status: string) => ({ from: "noreply@mybookingsite.io", subject: `(${status}) Low Rate Reservation No:1060900000107001-The Meadows Varkala`, text: `Booking Confirmation\nBooking ID\n1060900000107001\n${status}\nGuest Information\nLow Rate\nlr@example.com\n+91 09920031314\nThank you for booking with us.\nPremium Lawn View -\nCheck-in\n15 Jun 2027\nCheck-out\n16 Jun 2027\nLow Rate · 2 adults\nTotal\nINR 1.00\nRooms\nPremium Lawn View INR 1.00\nSub Total\nINR 1.00\nTotal\nINR 1.00\nAmount Paid\nINR 0.00` });
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", mail("Confirmed"));
+    expect(ing.status).toBe("approved");
+    expect((await sql("SELECT status FROM bookings WHERE id = ?", ing.booking_id))[0].status).toBe("provisional");
+    expect((await sql("SELECT status FROM approvals WHERE kind = 'booking' AND ref_id = ?", ing.booking_id))[0].status).toBe("pending");
+    const canc = await ok("prachi", "POST", "/api/inbox/ingest", mail("Cancelled"));
+    expect(canc.auto.what).toBe("cancelled");
+    expect((await sql("SELECT status FROM bookings WHERE id = ?", ing.booking_id))[0].status).toBe("cancelled");
+    const apr = (await sql("SELECT status, note FROM approvals WHERE kind = 'booking' AND ref_id = ?", ing.booking_id))[0];
+    expect(apr.status).toBe("returned"); expect(apr.note).toMatch(/booking cancelled/);
+    expect((await ok("trupti", "GET", "/api/work")).items.find((i: any) => i.key === `approval:${ing.booking_id}`)).toBeUndefined();
+    expect((await ok("trupti", "GET", "/api/approvals")).approvals.find((a: any) => a.ref_id === ing.booking_id)).toBeUndefined();
+  });
+});

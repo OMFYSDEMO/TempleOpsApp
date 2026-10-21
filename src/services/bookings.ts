@@ -195,6 +195,8 @@ export async function cancelBooking(db: D1Database, actor: Actor, property: Prop
   const now = nowIso();
   b.add("UPDATE bookings SET status = ?, cancelled_at = ?, cancel_reason = ?, updated_at = ? WHERE id = ?", newStatus, now, reason, now, bookingId);
   b.add("DELETE FROM room_nights WHERE booking_id = ?", bookingId);
+  // A rate or amendment approval still waiting on this booking has nothing left to decide: close it with the reason.
+  b.add("UPDATE approvals SET status = 'returned', decided_by = ?, decided_at = ?, note = ? WHERE property_id = ? AND kind = 'booking' AND ref_id = ? AND status = 'pending'", actor.id, now, `booking ${newStatus}: ${reason}`, property.id, bookingId);
   b.audit(`booking.${newStatus}`, "booking", bookingId, { status: bk.status }, { status: newStatus, reason, paid_paise: paid });
   let refundApprovalId: string | null = null;
   if (paid > 0) {
