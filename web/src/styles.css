@@ -131,6 +131,7 @@ details summary:hover { color: var(--accent); }
 .table-wrap { max-width: 100%; overflow: auto; margin-top: 10px; }
 table.bookings tbody tr { cursor: pointer; } table.bookings tbody tr.open { background: #f3f8f0; } table.bookings td small { display: block; color: var(--muted); font-size: 11px; }
 .roomchips { display: inline-flex; flex-wrap: wrap; gap: 4px; } .roomchips i { font-style: normal; font-size: 11px; font-weight: 650; background: var(--line2); color: var(--ink); border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
+.card .actions.end details { max-width: 100%; } .card .actions.end { flex-wrap: wrap; }
 .amend { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 
 /* ---------- Guest IDs ---------- */

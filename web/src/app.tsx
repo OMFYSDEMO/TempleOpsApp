@@ -102,7 +102,7 @@ export function App() {
         <main id="content"><Comp me={me} refs={ref} /></main>
       </div>
     </div>
-    {me.capabilities.includes("tasks") && <QuickCapture me={me} refs={ref} />}
+    {me.capabilities.includes("tasks") && !["pay", "pexp", "ids"].includes(current.key) && <QuickCapture me={me} refs={ref} />}
     {notifOpen && <div className="sheet" onClick={() => setNotifOpen(false)}><div onClick={(e) => e.stopPropagation()}><h3>Notifications</h3>{notifs.length === 0 ? <Empty>No notifications.</Empty> : notifs.map((n) => <div className="row" key={n.id}><div><div>{n.message}</div><div className="sub">{fmtDateTime(n.created_at)}</div></div></div>)}</div></div>}
     <Toaster />
   </>;

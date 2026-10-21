@@ -272,10 +272,11 @@ export function GstSheet({ me }: { me: Me; refs: Ref }) {
 
 export function AuditLog({ }: { me: Me; refs: Ref }) {
   const [period, setPeriod] = useState(thisPeriod());
+  const [limit, setLimit] = useState(100);
   const q = useLoad(() => get(`/reports/audit?period=${period}`), [period]);
   return <>
     <h2>Change log <small>who, when, before and after</small></h2>
-    <Field label="Month"><input type="month" value={period} onChange={(e: any) => setPeriod(e.currentTarget.value)} /></Field>
-    {!q.data ? <Loading error={q.error} /> : q.data.audit.length === 0 ? <Empty>Nothing in {period}.</Empty> : <Card>{q.data.audit.map((a: any) => <div className="row" key={a.id}><div><div>{a.action} · {a.entity} <span className="mono">{a.entity_id}</span></div><div className="sub">{a.actor_email} · {fmtDateTime(a.at)}</div>{(a.before_json || a.after_json) && <details><summary>detail</summary><div className="pre">{a.before_json && `before: ${a.before_json}\n`}{a.after_json && `after: ${a.after_json}`}</div></details>}</div></div>)}</Card>}
+    <Field label="Month"><input type="month" value={period} onChange={(e: any) => { setPeriod(e.currentTarget.value); setLimit(100); }} /></Field>
+    {!q.data ? <Loading error={q.error} /> : q.data.audit.length === 0 ? <Empty>Nothing in {period}.</Empty> : <Card title={`${q.data.audit.length} entries`} actions={q.data.audit.length > limit && <Btn small onClick={() => setLimit(limit + 200)}>Show {Math.min(200, q.data.audit.length - limit)} more</Btn>}>{q.data.audit.slice(0, limit).map((a: any) => <div className="row" key={a.id}><div><div>{a.action} · {a.entity} <span className="mono">{a.entity_id}</span></div><div className="sub">{a.actor_email} · {fmtDateTime(a.at)}</div>{(a.before_json || a.after_json) && <details><summary>detail</summary><div className="pre">{a.before_json && `before: ${a.before_json}\n`}{a.after_json && `after: ${a.after_json}`}</div></details>}</div></div>)}</Card>}
   </>;
 }

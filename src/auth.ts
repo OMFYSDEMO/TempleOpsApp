@@ -140,6 +140,7 @@ export const CAN: Record<string, Role[]> = {
   gst: ["accountant", "owner"],
   admin: ["owner"],
   audit: ["owner", "accountant", "revenue"],
+  balances: ["property", "revenue", "owner", "accountant"],
   ids_capture: ["property", "owner"],
   ids_view: ["sales", "property", "revenue", "owner"],
   form_c: ["sales", "revenue", "owner"],

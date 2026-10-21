@@ -91,7 +91,7 @@ r.post("/:id/void", requireCap("payments"), async (c) => {
 });
 
 // ---- Money accounts and transfers (F6) ----
-r.get("/accounts", requireCap("payments"), async (c) => {
+r.get("/accounts", requireCap("balances"), async (c) => {
   const p = c.get("property");
   const asOf = c.req.query("as_of") ?? todayIn(p.timezone);
   const rows = await all(c.env.DB,
