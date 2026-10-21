@@ -2,6 +2,7 @@ import type { Actor } from "../auth";
 import { Batch, HttpError, all, one, type PropertyRow } from "../db";
 import { nowIso, todayIn } from "../domain/dates";
 import { slabBpForRoomNight } from "../domain/gst";
+import { isWholeVilla } from "../email/parsers";
 import { splitInclusive } from "../domain/money";
 import type { ParsedEmail } from "../email/parsers";
 import { createBooking, cancelBooking, conflicts, gstPolicy } from "./bookings";
@@ -52,7 +53,7 @@ async function resolveChannel(db: D1Database, propertyId: string, parsed: Parsed
 async function freeRoomsOfType(db: D1Database, propertyId: string, roomName: unknown, checkIn: string, checkOut: string): Promise<{ ids: string[]; typeKnown: boolean }> {
   const want = norm(roomName);
   const rooms = await all<{ id: string; name: string; code: string }>(db, "SELECT id, name, code FROM locations WHERE property_id = ? AND kind = 'room' AND active = 1 ORDER BY sort, code", propertyId);
-  const ofType = want ? rooms.filter((r) => { const n = norm(r.name); return n === want || want.startsWith(n) || n.startsWith(want); }) : [];
+  const ofType = isWholeVilla(roomName) ? rooms : want ? rooms.filter((r) => { const n = norm(r.name); return n === want || want.startsWith(n) || n.startsWith(want); }) : [];
   if (!ofType.length) return { ids: [], typeKnown: false };
   const taken = new Set((await conflicts(db, propertyId, ofType.map((r) => r.id), checkIn, checkOut)).map((c) => c.room_id));
   return { ids: ofType.filter((r) => !taken.has(r.id)).map((r) => r.id), typeKnown: true };
@@ -70,10 +71,12 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
       if (checkOut < todayIn(property.timezone)) return { applied: false, note: "stay is in the past" };
       const channel = await resolveChannel(db, property.id, parsed);
       if (!channel) return { applied: false, note: `channel "${d.channel ?? "?"}" is not set up: pick it by hand or add it under Settings` };
-      const wanted = Math.max(1, Number(d.rooms ?? 1));
+      const villa = isWholeVilla(d.room_name);
       const free = await freeRoomsOfType(db, property.id, d.room_name, checkIn, checkOut);
       if (!free.typeKnown) return { applied: false, note: `room type "${d.room_name ?? "?"}" does not match a room: pick the room(s) by hand` };
-      if (free.ids.length < wanted) return { applied: false, note: `only ${free.ids.length} of ${wanted} ${d.room_name} room(s) free for those dates: possible overbooking, pick by hand` };
+      const roomCount = (await all<{ n: number }>(db, "SELECT COUNT(*) AS n FROM locations WHERE property_id = ? AND kind = 'room' AND active = 1", property.id))[0]?.n ?? 0;
+      const wanted = villa ? roomCount : Math.max(1, Number(d.rooms ?? 1));
+      if (free.ids.length < wanted) return { applied: false, note: villa ? `whole villa booked but only ${free.ids.length} of ${wanted} rooms are free for those dates: pick by hand or move the other stay` : `only ${free.ids.length} of ${wanted} ${d.room_name} room(s) free for those dates: possible overbooking, pick by hand` };
       const roomIds = free.ids.slice(0, wanted);
       const nights = Math.max(1, Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86_400_000));
       let nightly: number;

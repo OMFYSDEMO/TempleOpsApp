@@ -142,9 +142,9 @@ describe("STAAH booking engine (website) confirmations", () => {
   });
 
   it("a room type AVOS does not know waits for a person, and 'book by hand' from Reservations closes the card", async () => {
-    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@mybookingsite.io", subject: "(Confirmed) Test Test Reservation No:1060900000105133-The Meadows Varkala", html: html("1060900000105133", "Test Test", "Villa", "20 Mar 2027", "21 Mar 2027", "1.00") });
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@mybookingsite.io", subject: "(Confirmed) Test Test Reservation No:1060900000105133-The Meadows Varkala", html: html("1060900000105133", "Test Test", "Garden Cottage", "20 Mar 2027", "21 Mar 2027", "1.00") });
     expect(ing.status).toBe("pending");
-    expect(ing.parsed.data.room_name).toBe("Villa");
+    expect(ing.parsed.data.room_name).toBe("Garden Cottage");
     const card = (await ok("prachi", "GET", "/api/inbox?status=pending")).items.find((i: any) => i.id === ing.id);
     expect(card.room_options.length).toBe(4); expect(card.suggested_room_ids).toEqual([]);
     // Sales books it by hand in Reservations, naming the email: the card is marked done with the booking.
@@ -168,5 +168,29 @@ describe("booking engine · room line with the amount on the same line", () => {
     const r = parseInboundEmail("noreply@mybookingsite.io", "(Confirmed) X Y Reservation No:1060900000105310-The Meadows Varkala", undefined,
       "Booking Confirmation\nBooking ID\n1060900000105310\nConfirmed\nGuest Information\nX Y\nx@example.com\n+91 09920031314\nThank you for booking with us.\nPremium Lawn View -\nCheck-in\n28 Oct 2026\nCheck-out\n29 Oct 2026\nX Y · 2 adults\nTotal\nINR 1.00\nRooms\nPremium Lawn View INR 1.00\nSub Total\nINR 1.00\nTotal\nINR 1.00\nAmount Paid\nINR 0.00");
     expect(r.data.room_name).toBe("Premium Lawn View"); expect(r.data.rooms).toBe(1); expect(r.data.check_in).toBe("2026-10-28");
+  });
+});
+
+describe("booking engine · whole villa", () => {
+  beforeAll(seed);
+  const villaMail = (id: string, ci: string, co: string, total: string) => ({ from: "noreply@mybookingsite.io", subject: `(Confirmed) Full House Reservation No:${id}-The Meadows Varkala`, text: `Booking Confirmation\nBooking ID\n${id}\nConfirmed\nGuest Information\nFull House\nfh@example.com\n+91 09920031314\nThank you for booking with us.\nVilla -\nCheck-in\n${ci}\nCheck-out\n${co}\nFull House · 8 adults\nTotal\nINR ${total}\nRooms\nVilla INR ${total}\nSub Total\nINR ${total}\nTotal\nINR ${total}\nAmount Paid\nINR 0.00` });
+  it("'Villa' means every room: all four are booked under one stay at the total split per room-night", async () => {
+    // 2 nights × 4 rooms; ₹2,00,000 incl. → ₹25,000 per room-night ex-GST on the unregistered seed (above tariff → approves itself)
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", villaMail("1060900000106001", "10 Apr 2027", "12 Apr 2027", "2,00,000.00"));
+    expect(ing.parsed.data.room_name).toBe("Villa");
+    expect(ing.status).toBe("approved"); expect(ing.auto.what).toBe("booked");
+    const rooms = await sql("SELECT room_id, nightly_rate_paise FROM booking_rooms WHERE booking_id = ? ORDER BY room_id", ing.booking_id);
+    expect(rooms.map((r: any) => r.room_id)).toEqual(["loc_r1", "loc_r2", "loc_r3", "loc_r4"]);
+    expect(rooms[0].nightly_rate_paise).toBe(2500000);
+    expect((await sql("SELECT COUNT(*) AS n FROM room_nights WHERE booking_id = ?", ing.booking_id))[0].n).toBe(8);
+  });
+  it("when one room is already taken the villa waits with every room shown and the reason", async () => {
+    await ok("prachi", "POST", "/api/bookings", { guest_name: "In The Way", guest_phone: "9600000001", check_in: "2027-05-01", check_out: "2027-05-02", rooms: [{ room_id: "loc_r3", nightly_rate_paise: 550000 }] });
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", villaMail("1060900000106002", "01 May 2027", "02 May 2027", "80,000.00"));
+    expect(ing.status).toBe("pending"); expect(ing.auto.note).toMatch(/whole villa .* 3 of 4/);
+    const card = (await ok("prachi", "GET", "/api/inbox?status=pending")).items.find((i: any) => i.id === ing.id);
+    expect(card.room_options.filter((o: any) => o.matches_type)).toHaveLength(4);
+    expect(card.suggested_room_ids.sort()).toEqual(["loc_r1", "loc_r2", "loc_r4"]);
+    expect(card.nightly_rate_paise).toBe(2000000);
   });
 });

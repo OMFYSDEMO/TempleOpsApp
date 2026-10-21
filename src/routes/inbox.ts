@@ -7,6 +7,7 @@ import { parseInboundEmail, PARSER_VERSION, type ParsedEmail } from "../email/pa
 import { createBooking, gstPolicy, conflicts } from "../services/bookings";
 import { autoApply, REF_MATCH, refArgs } from "../services/inboxAuto";
 import { slabBpForRoomNight } from "../domain/gst";
+import { isWholeVilla } from "../email/parsers";
 import type { Env } from "../env";
 
 const r = newRouter();
@@ -44,10 +45,11 @@ r.get("/", async (c) => {
           : t.lead_id ? await one(c.env.DB, "SELECT g.name, 'hold' AS status FROM leads l JOIN guests g ON g.id = l.guest_id WHERE l.id = ?", t.lead_id) : null;
         holders[t.room_id] = who ? `${who.name}${who.status === "provisional" ? " (awaiting approval)" : who.status === "hold" ? " (on hold)" : ""}` : "another booking";
       }
+      const villa = isWholeVilla(d.room_name);
       const want = String(d.room_name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-      const ofType = (r: { name: string }) => { const n = r.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); return !!want && (n === want || want.startsWith(n) || n.startsWith(want)); };
+      const ofType = (r: { name: string }) => { if (villa) return true; const n = r.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); return !!want && (n === want || want.startsWith(n) || n.startsWith(want)); };
       room_options = rooms.map((r) => ({ id: r.id, name: r.name, free: !holders[r.id], taken_by: holders[r.id] ?? null, matches_type: ofType(r) }));
-      const wanted = Math.max(1, Number(d.rooms ?? 1));
+      const wanted = villa ? rooms.length : Math.max(1, Number(d.rooms ?? 1));
       suggested_room_ids = rooms.filter((r) => ofType(r) && !holders[r.id]).slice(0, wanted).map((r) => r.id);
       nightly_rate_paise = impliedNightly(p, d, wanted);
     }

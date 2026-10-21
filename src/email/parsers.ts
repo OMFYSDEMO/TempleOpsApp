@@ -3,6 +3,9 @@ import { parseLooseDate } from "../domain/dates";
 
 export const PARSER_VERSION = "2026-10-21";
 
+/** "Villa", "Entire villa", "Whole villa", "Full villa": the booking engine's name for all rooms together. */
+export const isWholeVilla = (roomName: unknown) => /^(the\s+)?(entire|whole|full|complete|exclusive)?\s*villa\b/i.test(String(roomName ?? "").trim());
+
 export interface ParsedEmail {
   source: "staah" | "swiftbook" | "airpay" | "bookingengine" | "unknown";
   kind: "new_reservation" | "modification" | "cancellation" | "payment" | "unknown";

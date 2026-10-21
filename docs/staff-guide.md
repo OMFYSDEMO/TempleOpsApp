@@ -31,7 +31,7 @@ Three habits that make everything else work:
 ### Inbox — bookings
 - STAAH reservations, cancellations and SwiftBook confirmations book themselves when everything lines up. The ones that wait show the reason on the card.
 - The card shows the rooms with who holds them; free rooms of the right type are pre-ticked and the rate is filled in. Check the dates and press **Book**. Press **Re-read** if the email was fixed at the source.
-- Website bookings from the STAAH booking engine ("(Confirmed) … Reservation No: …") arrive here too, as Direct.
+- Website bookings from the STAAH booking engine ("(Confirmed) … Reservation No: …") arrive here too, as Direct. A "Villa" booking means the whole house: all four rooms go under one stay, with the total split per room-night. If one room is already taken for those dates the card waits and says so; move the other stay or pick by hand.
 - If a card cannot be read, or the room type is one AVOS does not know, press **Book by hand in Reservations**: the booking form opens with whatever the email carried, you tap the room and save, and the card is marked done. Nothing is ever stuck on Dismiss or Re-read.
 
 ### Reservations
