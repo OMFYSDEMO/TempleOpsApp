@@ -251,22 +251,52 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
 function BookingDetail({ me, refs, d, rooms, tariffFor, onChange, onClose }: { me: Me; refs: Ref; d: any; rooms: Ref["locations"]; tariffFor: (roomId: string, night: string) => number | null; onChange: () => Promise<void>; onClose: () => void }) {
   const b = d.booking; const live = ["provisional", "approved", "checked_in"].includes(b.status);
   const canDelete = b.status === "provisional" && (me.actor.role !== "sales" || b.created_by === me.actor.id) && d.paid_paise === 0;
-  return <Card title={<>{d.guest.name} <Status s={b.status} />{b.rate_vs_tariff === "below" && <> <Status s="below" /></>}</>} sub={<>{fmtDate(b.check_in)} → {fmtDate(b.check_out)} · {b.nights} night{b.nights > 1 ? "s" : ""} · {d.channel.name}{b.external_ref ? ` · ref ${b.external_ref}` : ""} · {b.adults} adult{b.adults > 1 ? "s" : ""}{b.children ? `, ${b.children} child${b.children > 1 ? "ren" : ""}` : ""}{d.guest.phone ? ` · ${d.guest.phone}` : ""}</>}
-    actions={<div className="actions"><Btn small onClick={onClose}>Close</Btn>{canDelete && <Btn small kind="danger" onClick={() => run(async () => { await del(`/bookings/${b.id}`); onClose(); await onChange(); }, "Deleted")}>Delete</Btn>}{["provisional", "approved"].includes(b.status) && <Btn small kind="danger" onClick={() => { const reason = prompt("Cancellation reason"); if (reason) run(async () => { await post(`/bookings/${b.id}/cancel`, { reason }); await onChange(); }, "Cancelled · rooms released"); }}>Cancel booking</Btn>}</div>}>
-    <div className="grid two">
+  const roomTotal = d.rooms.reduce((s: number, r: any) => s + r.room_total_paise, 0); const gst = d.rooms.reduce((s: number, r: any) => s + r.gst_paise, 0);
+  const guests = `${b.adults} adult${b.adults > 1 ? "s" : ""}${b.children ? `, ${b.children} child${b.children > 1 ? "ren" : ""}` : ""}`;
+  const cancel = () => { const reason = prompt("Cancellation reason"); if (reason) run(async () => { await post(`/bookings/${b.id}/cancel`, { reason }); await onChange(); }, "Cancelled · rooms released"); };
+  const remove = () => run(async () => { await del(`/bookings/${b.id}`); onClose(); await onChange(); }, "Deleted");
+  return <section className="card detail">
+    <div className="detailhead">
       <div>
-        {d.rooms.map((r: any) => <Row key={r.id} label={<><b>{r.room_name}</b> · {r.nights} night{r.nights > 1 ? "s" : ""} @ {inr(r.nightly_rate_paise)}</>} sub={`${r.tariff_rate_paise ? `tariff ${inr(r.tariff_rate_paise)} · ` : ""}GST ${r.gst_rate_bp / 100}%`} value={inr(r.room_total_paise + r.gst_paise)} />)}
+        <div className="eyebrow">Booking info</div>
+        <h3 className="big">{d.guest.name}</h3>
+        <div className="pills"><Status s={b.status} />{b.rate_vs_tariff === "below" && <Status s="below" />}</div>
+        <div className="sub">{d.channel.name}{b.external_ref ? ` · ref ${b.external_ref}` : ""}{d.guest.phone ? ` · ${d.guest.phone}` : ""}{d.guest.email ? ` · ${d.guest.email}` : ""}</div>
       </div>
+      <div className="actions">
+        <Btn onClick={onClose}>Close</Btn>
+        {canDelete && <Btn kind="danger" onClick={remove}>Delete</Btn>}
+        {["provisional", "approved"].includes(b.status) && <Btn kind="danger" onClick={cancel}>Cancel booking</Btn>}
+      </div>
+    </div>
+    <div className="detailgrid">
       <div>
-        <Row label="Gross" value={inr(b.gross_paise)} /><Row label="Paid" value={inr(d.paid_paise)} /><Row strong label="Balance" value={<span style={d.balance_paise > 0 ? { color: "var(--amb)" } : undefined}>{inr(d.balance_paise)}</span>} />
+        <div className="facts">
+          <div><small>Check-in</small><b>{fmtDate(b.check_in)}</b></div>
+          <div><small>Check-out</small><b>{fmtDate(b.check_out)}</b></div>
+          <div><small>Duration</small><b>{b.nights} night{b.nights > 1 ? "s" : ""}</b></div>
+          <div><small>Guests</small><b>{guests}</b></div>
+          <div><small>Channel</small><b>{d.channel.name}</b></div>
+          <div><small>Rooms</small><b><span className="roomchips">{d.rooms.map((r: any) => <i key={r.id}>{r.room_name}</i>)}</span></b></div>
+        </div>
+        <div className="sectionhead"><b>Rooms and rates</b></div>
+        {d.rooms.map((r: any) => <Row key={r.id} label={<><b>{r.room_name}</b> · {r.nights} night{r.nights > 1 ? "s" : ""} @ {inr(r.nightly_rate_paise)}</>} sub={`${r.tariff_rate_paise ? `tariff ${inr(r.tariff_rate_paise)} · ` : ""}GST ${r.gst_rate_bp / 100}%`} value={inr(r.room_total_paise + r.gst_paise)} />)}
+        {b.notes && <div className="note" style={{ whiteSpace: "pre-line", marginTop: "12px" }}>{b.notes}</div>}
+        {(d.invoices.length > 0 || d.approvals.some((a: any) => a.status !== "auto")) && <div className="sectionhead" style={{ marginTop: "14px" }}><b>Invoices and approvals</b></div>}
         {d.invoices.map((i: any) => <Row key={i.id} label={`Invoice ${i.number}`} sub={fmtDate(i.issued_on)} value={<Status s={i.status} />} />)}
         {d.approvals.filter((a: any) => a.status !== "auto").map((a: any) => <Row key={a.id} label={`${a.kind} approval`} sub={a.note} value={<Status s={a.status} />} />)}
       </div>
+      <aside className="pricebox">
+        <Row label="Room total" sub="ex-GST" value={inr(roomTotal)} />
+        <Row label="GST" value={inr(gst)} />
+        <Row strong label="Gross" value={inr(b.gross_paise)} />
+        <Row label="Paid" value={inr(d.paid_paise)} />
+        <Row strong label="Balance" value={<span style={d.balance_paise > 0 ? { color: "var(--amb)" } : undefined}>{inr(d.balance_paise)}</span>} />
+      </aside>
     </div>
-    {b.notes && <div className="sub" style={{ whiteSpace: "pre-line", marginTop: "6px" }}>{b.notes}</div>}
     <details><summary>Audit trail ({d.audit.length})</summary>{d.audit.map((a: any) => <div className="muted" key={a.id}>{a.at} · {a.actor_email} · {a.action}{a.action === "booking.amend" && a.after_json ? ` · ${JSON.parse(a.after_json).remark ?? ""}` : ""}</div>)}</details>
     {live && <Amend key={b.id} me={me} d={d} rooms={rooms} refs={refs} tariffFor={tariffFor} onDone={onChange} />}
-  </Card>;
+  </section>;
 }
 
 /** Correct a booking in place: room exchange, dates, rates, guest, channel. A remark is required and lands in the audit trail. */

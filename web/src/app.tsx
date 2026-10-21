@@ -49,6 +49,8 @@ export function App() {
   const [me, setMe] = useState<Me | null>(null); const [ref, setRef] = useState<Ref | null>(null); const [signedOut, setSignedOut] = useState(false); const [err, setErr] = useState<string | null>(null);
   const [appEnv, setAppEnv] = useState<string>("");
   const [notifOpen, setNotifOpen] = useState(false); const [notifs, setNotifs] = useState<any[]>([]);
+  const [openGroups, setOpenGroups] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("avos.navGroups") || "[]"); } catch { return []; } });
+  const toggleGroup = (g: string) => setOpenGroups((gs) => { const next = gs.includes(g) ? gs.filter((x) => x !== g) : [...gs, g]; try { localStorage.setItem("avos.navGroups", JSON.stringify(next)); } catch {} return next; });
   const [queued, setQueued] = useState(readQueue().length);
   const [changePw, setChangePw] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -94,7 +96,10 @@ export function App() {
     <div className="shell">
       <nav className={`side ${navOpen ? "is-open" : ""}`} id="avos-navigation" aria-label="AVOS navigation">
         <a className="brand" href="#"><span className="mark">A</span><span><b>AVOS</b><small>{me.property.name}</small></span><button type="button" className="btn menu-close" aria-label="Close navigation" onClick={() => setNavOpen(false)}>×</button></a>
-        {groups.map((g) => <div key={g}><div className="grp">{g}</div>{visible.filter((s) => s.group === g).map((s) => <a key={s.key} href={`#${s.key}`} className={`item ${s.key === current.key ? "on" : ""}`}><Icon name={s.icon} />{s.label}</a>)}</div>)}
+        {groups.map((g) => { const isOpen = g === current.group || openGroups.includes(g); return <div key={g} className={`navgrp ${isOpen ? "open" : ""}`}>
+          <button type="button" className="grp" aria-expanded={isOpen} onClick={() => toggleGroup(g)}><span>{g}</span>{g === current.group && !isOpen ? null : <Icon name="chevron" size={14} />}</button>
+          {isOpen && visible.filter((s) => s.group === g).map((s) => <a key={s.key} href={`#${s.key}`} className={`item ${s.key === current.key ? "on" : ""}`}><Icon name={s.icon} />{s.label}</a>)}
+        </div>; })}
         <div className="foot"><b>{me.actor.role.charAt(0).toUpperCase() + me.actor.role.slice(1)} access</b>{roleNote}</div>
       </nav>
       {navOpen && <button type="button" className="menu-backdrop" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
