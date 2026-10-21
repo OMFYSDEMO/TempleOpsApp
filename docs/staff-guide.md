@@ -121,6 +121,7 @@ Change a booking's rooms or rate (ask sales), record bank expenses, see P&L or s
 2. Four tiers propose matches: reference, exact amount, fee-tolerant for gateway receipts, OTA subset. Nothing is written until you **Accept**. Aim for more than 80% matched automatically.
 3. You reconcile credits. Debits (bank expenses, refunds) are the owner's or the CA's.
 4. Lines for the Yes Bank → IDFC transfers made before AVOS tracked them: mark them noted, do not match them to anything.
+5. IDFC's transaction alert emails arrive here on their own as statement lines, so most of the month is already proposed before you paste anything. An Airpay settlement is posted straight away (Airpay clearing → IDFC) and you get a notification; nothing to do.
 
 ### Revenue overview and pre-close
 - Revenue by channel, direct share, OTA clearing for the month.
@@ -173,7 +174,7 @@ Everything above, plus:
 - **Refunds approved by the revenue desk**: make the transfer, record it on Approvals with the reference.
 
 ### Weekly
-- **Dashboard**: operating result, expenses by category, cash position by account, who does what.
+- **Dashboard**: operating result, expenses by category, cash position by account with the balance the bank last reported underneath (and whether it agrees), who does what.
 - **Slip report** on My work: the conversation to have is about tolerances and staffing, not about individuals.
 
 ### Monthly

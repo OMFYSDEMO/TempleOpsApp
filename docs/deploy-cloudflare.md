@@ -136,6 +136,8 @@ Once mail reaches the Worker, the inbox runs itself: a STAAH reservation books t
 
 The parsers were written against the common STAAH, SwiftBook and Airpay templates; every email's raw `.eml` is kept in R2 (`inbox/…`), so when a template differs, nothing is lost: the card shows what was read, a person corrects it, and the parser can be tuned from the stored sample.
 
+**Bank transaction alerts.** IDFC FIRST sends "Transaction alert from IDFC FIRST Bank" to bookings@meadowsvarkala.com. Forward them to the inbox address (Gmail → Settings → Filters → from `transaction.alerts@idfcfirstbank.com` → Forward to inbox@shajianandan.com; confirm the forwarding address once). Each alert becomes a statement line on Smart Reconcile for the account whose last digits match (set them under Settings & users → Bank & cash accounts). A credit from AIRPAY PAYMENT SERVICES is settled on the spot: a transfer from Airpay clearing into that bank, matched to the line, with the revenue desk told. The balance the bank reports is shown under Cash position on the Dashboard next to AVOS's own figure.
+
 The STAAH booking engine's own confirmations for website bookings (from noreply@mybookingsite.io, subject "(Confirmed) … Reservation No: …") are read as Direct bookings; "(Cancelled)" releases the stay. Any email the reader cannot place still shows a "Book by hand in Reservations" button on its card.
 
 ## 9. Lead hooks (CRM, website form, Instagram and Facebook lead forms)

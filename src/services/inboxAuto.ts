@@ -1,5 +1,5 @@
 import type { Actor } from "../auth";
-import { Batch, HttpError, all, one, type PropertyRow } from "../db";
+import { Batch, HttpError, all, one, id, type PropertyRow } from "../db";
 import { nowIso, todayIn } from "../domain/dates";
 import { slabBpForRoomNight } from "../domain/gst";
 import { isWholeVilla } from "../email/parsers";
@@ -8,6 +8,9 @@ import type { ParsedEmail } from "../email/parsers";
 import { createBooking, cancelBooking, conflicts, gstPolicy } from "./bookings";
 import { notifyRole } from "./notify";
 import { recordPayment } from "./payments";
+import { hashLine, proposeMatch } from "../domain/recon";
+import { candidatesFor } from "../routes/recon";
+import { addDays } from "../domain/dates";
 
 /**
  * Inbox automation (W1). A parsed email is applied to the books the moment it arrives when every fact lines up;
@@ -23,7 +26,7 @@ import { recordPayment } from "./payments";
 export const REF_MATCH = "(external_ref = ? OR external_ref LIKE ? OR external_ref LIKE ?)";
 export const refArgs = (ref: string) => [ref, `${ref} (%`, `% (${ref})`];
 
-export type AutoResult = { applied: true; what: "booked" | "cancelled" | "paid"; id: string } | { applied: false; note: string };
+export type AutoResult = { applied: true; what: "booked" | "cancelled" | "paid" | "settled" | "statement line"; id: string } | { applied: false; note: string };
 
 /** Automation acts for the owner (FKs need a real user) but signs the audit as itself. */
 async function automationActor(db: D1Database, propertyId: string): Promise<Actor | null> {
@@ -131,6 +134,52 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
       await notifyRole(b, property.id, "property", "inbox_auto_paid", `Airpay ${Number(d.amount_paise) / 100} received for ${bk[0].guest_name} (order ${d.order_id})`, { kind: "payment", id: pay.id });
       await b.run();
       return { applied: true, what: "paid", id: pay.id };
+    }
+    if (item.kind === "bank_alert") {
+      if (parsed.confidence !== "high") return { applied: false, note: "could not read the amount or date on the bank alert" };
+      const banks = await all<any>(db, "SELECT id, name, account_no, is_default FROM money_accounts WHERE property_id = ? AND kind = 'bank' AND active = 1", property.id);
+      const last = String(d.account_last ?? "");
+      const acct = banks.find((b) => b.account_no && last && (last.endsWith(String(b.account_no)) || String(b.account_no).endsWith(last))) ?? (banks.length === 1 ? banks[0] : null);
+      if (!acct) return { applied: false, note: `which bank is A/C ...${last || "?"}? Put the account's last digits on it under Settings & users → Bank & cash accounts` };
+      const signed = d.direction === "debited" ? -Number(d.amount_paise) : Number(d.amount_paise);
+      const description = [d.method, d.counterparty, d.reference].filter(Boolean).join(" ");
+      const lineHash = hashLine(String(d.on_date), description, signed);
+      const dupLine = await one<{ id: string }>(db, "SELECT id FROM bank_statement_lines WHERE property_id = ? AND account_id = ? AND line_hash = ?", property.id, acct.id, lineHash);
+      const now = nowIso();
+      const b = new Batch(db, actor);
+      if (d.balance_paise != null) b.add("UPDATE money_accounts SET reported_balance_paise = ?, reported_at = ? WHERE id = ?", Number(d.balance_paise), `${d.on_date}T${d.at_time ?? "00:00:00"}+05:30`, acct.id);
+      if (dupLine) {
+        b.add("UPDATE inbox_items SET status = 'duplicate', auto_note = 'already on the statement' WHERE id = ?", item.id);
+        await b.run();
+        return { applied: false, note: "already recorded" };
+      }
+      const lid = id("bsl");
+      const isAirpay = signed > 0 && /airpay/i.test(String(d.counterparty ?? ""));
+      if (isAirpay) {
+        // Airpay settles the gateway float to the bank: a transfer from Airpay clearing, matched to this line at once.
+        const gw = await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = 'gateway' AND active = 1 ORDER BY id LIMIT 1", property.id);
+        if (!gw) return { applied: false, note: "no gateway clearing account to settle from" };
+        const tid = id("trf");
+        b.add("INSERT INTO transfers (id, property_id, from_account_id, to_account_id, amount_paise, on_date, reference, note, recorded_by, idempotency_key) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          tid, property.id, gw.id, acct.id, signed, d.on_date, d.reference ?? null, `Airpay settlement · from the ${d.bank ?? "bank"} alert`, actor.id, `bankalert:${item.id}`);
+        b.audit("transfer.create", "transfer", tid, null, { from: "gateway", to: acct.name, amount_paise: signed, reference: d.reference, via: "bank alert" });
+        b.add("INSERT INTO bank_statement_lines (id, property_id, account_id, run_id, on_date, description, amount_paise, reference, line_hash, status, tier, match_kind, match_id, match_json, matched_by, matched_at) VALUES (?,?,?,?,?,?,?,?,?,'matched',1,'transfer',?,?,?,?)",
+          lid, property.id, acct.id, `alert:${item.id}`, d.on_date, description, signed, d.reference ?? null, lineHash, tid, JSON.stringify({ label: "Airpay settlement", via: "bank alert" }), actor.id, now);
+        b.add("UPDATE inbox_items SET status = 'approved', auto_applied = 1, auto_note = NULL, external_ref = ? WHERE id = ?", d.reference ?? null, item.id);
+        b.audit("inbox.auto_bank", "inbox_item", item.id, { status: "routed" }, { status: "approved", transfer_id: tid, line_id: lid, amount_paise: signed });
+        await notifyRole(b, property.id, "revenue", "bank_alert", `Airpay settled ${(signed / 100).toLocaleString("en-IN")} into ${acct.name} (${d.reference ?? "no ref"})`, { kind: "transfer", id: tid });
+        await b.run();
+        return { applied: true, what: "settled", id: tid };
+      }
+      // Any other movement becomes a statement line with the usual proposal; a person accepts it on Smart Reconcile.
+      const cands = await candidatesFor(db, property.id, acct.id, String(d.on_date).slice(0, 8) + "01", addDays(String(d.on_date), 3));
+      const proposal = proposeMatch({ on_date: String(d.on_date), description, amount_paise: signed, reference: d.reference ?? null, line_hash: lineHash }, cands, { feeBp: property.recon_fee_tolerance_bp, subsetBp: property.recon_subset_tolerance_bp });
+      b.add("INSERT INTO bank_statement_lines (id, property_id, account_id, run_id, on_date, description, amount_paise, reference, line_hash, status, tier, match_kind, match_id, match_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        lid, property.id, acct.id, `alert:${item.id}`, d.on_date, description, signed, d.reference ?? null, lineHash, proposal ? "proposed" : "unmatched", proposal?.tier ?? null, proposal?.kind ?? null, proposal?.id ?? null, proposal ? JSON.stringify({ label: proposal.label, ...proposal.detail, via: "bank alert" }) : null);
+      b.add("UPDATE inbox_items SET status = 'approved', auto_applied = 1, auto_note = ?, external_ref = ? WHERE id = ?", proposal ? `statement line proposed: ${proposal.label}` : "statement line recorded, nothing matched yet", d.reference ?? null, item.id);
+      b.audit("inbox.auto_bank", "inbox_item", item.id, { status: "routed" }, { status: "approved", line_id: lid, amount_paise: signed, proposal: proposal?.kind ?? null });
+      await b.run();
+      return { applied: true, what: "statement line", id: lid };
     }
     if (item.kind === "modification") return { applied: false, note: "modifications are applied by hand: compare with the booking and edit it" };
     return { applied: false, note: "could not tell what this email is" };

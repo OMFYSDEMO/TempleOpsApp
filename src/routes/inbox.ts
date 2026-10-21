@@ -68,7 +68,7 @@ async function initialStatus(env: Env, propertyId: string, parsed: ParsedEmail, 
       propertyId, parsed.external_ref, self?.id ?? "", self?.received_at ?? "9999");
     if (earlier) return "duplicate";
   }
-  return parsed.kind === "payment" ? "routed" : "pending";
+  return parsed.kind === "payment" || parsed.kind === "bank_alert" ? "routed" : "pending";
 }
 
 /** Run automation on a stored item and return the outcome plus the row as it now stands. */

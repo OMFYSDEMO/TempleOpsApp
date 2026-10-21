@@ -14,7 +14,7 @@ function signFilter(role: string): string {
   return role === "revenue" ? "AND l.amount_paise > 0" : "";
 }
 
-async function candidatesFor(db: D1Database, propertyId: string, accountId: string, from: string, to: string): Promise<Candidate[]> {
+export async function candidatesFor(db: D1Database, propertyId: string, accountId: string, from: string, to: string): Promise<Candidate[]> {
   const pays = await all<any>(db, `SELECT p.id, p.amount_paise, p.reference, p.received_on, p.method, p.kind, g.name AS guest_name, e.amount_paise AS fee_paise
      FROM payments p LEFT JOIN guests g ON g.id = p.guest_id LEFT JOIN expenses e ON e.id = p.fee_expense_id
      WHERE p.property_id = ? AND p.account_id = ? AND p.status IN ('recorded','confirmed') AND p.method != 'ota' AND p.received_on BETWEEN ? AND ?`, propertyId, accountId, from, to);

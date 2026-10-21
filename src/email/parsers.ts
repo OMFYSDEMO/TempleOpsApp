@@ -1,14 +1,14 @@
 import { rupeesToPaise } from "../domain/money";
 import { parseLooseDate } from "../domain/dates";
 
-export const PARSER_VERSION = "2026-10-21";
+export const PARSER_VERSION = "2026-10-21b";
 
 /** "Villa", "Entire villa", "Whole villa", "Full villa": the booking engine's name for all rooms together. */
 export const isWholeVilla = (roomName: unknown) => /^(the\s+)?(entire|whole|full|complete|exclusive)?\s*villa\b/i.test(String(roomName ?? "").trim());
 
 export interface ParsedEmail {
-  source: "staah" | "swiftbook" | "airpay" | "bookingengine" | "unknown";
-  kind: "new_reservation" | "modification" | "cancellation" | "payment" | "unknown";
+  source: "staah" | "swiftbook" | "airpay" | "bookingengine" | "bank" | "unknown";
+  kind: "new_reservation" | "modification" | "cancellation" | "payment" | "bank_alert" | "unknown";
   external_ref: string | null;
   data: Record<string, unknown>;
   confidence: "high" | "low";
@@ -150,6 +150,29 @@ export function parseBookingEngine(subject: string, body: string, year: number):
   return { source: "bookingengine", kind, external_ref: ref, data, confidence };
 }
 
+/**
+ * Bank transaction alert (IDFC FIRST): "Your A/C XXXXXXX3390 has been credited with INR 32,729.33 on 21-10-2026
+ * 17:02:09 vide NEFT payment reference CMS2942643026507 received from AIRPAY PAYMENT SERVICES PRIVATE . New balance is
+ * INR 503,881.33." Debits read "has been debited with INR ... towards/to <party>". One alert = one statement line.
+ */
+export function parseBankAlert(subject: string, body: string): ParsedEmail {
+  const flat = body.replace(/\s+/g, " ");
+  const m = flat.match(/A\/C\s*(?:No\.?\s*)?[Xx*]*(\d{3,6})\s+has been\s+(credited|debited)\s+with\s+(?:INR|Rs\.?|₹)\s*([\d,]+\.?\d*)\s+on\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?/i);
+  const method = flat.match(/vide\s+([A-Za-z\/]+)\s+(?:payment\s+)?reference/i)?.[1] ?? flat.match(/\b(NEFT|IMPS|RTGS|UPI|ACH|NACH|ECS|CMS)\b/i)?.[1] ?? null;
+  const reference = flat.match(/reference\s*(?:no\.?|number|#)?\s*:?\s*([A-Za-z0-9\-\/]{6,})/i)?.[1] ?? null;
+  const counterparty = flat.match(/received from\s+(.+?)\s*\.(?:\s|$)/i)?.[1]?.trim() ?? flat.match(/\b(?:towards|to|at|paid to)\s+(.+?)\s*\.(?:\s|$)/i)?.[1]?.trim() ?? null;
+  const balance = flat.match(/(?:New|Available|Closing)\s+balance\s+is\s+(?:INR|Rs\.?|₹)\s*([\d,]+\.?\d*)/i)?.[1] ?? null;
+  const bank = /idfc/i.test(subject + " " + flat) ? "IDFC FIRST" : flat.match(/Greetings from\s+([A-Z][A-Za-z ]+Bank)/)?.[1] ?? null;
+  const onDate = m ? parseLooseDate(m[4], new Date().getUTCFullYear()) : null;
+  const data = {
+    bank, account_last: m?.[1] ?? null, direction: m ? (m[2].toLowerCase() as "credited" | "debited") : null,
+    amount_paise: m ? rupeesToPaise(m[3]) : null, on_date: onDate, at_time: m?.[5] ?? null, method: method ? method.toUpperCase() : null, reference, counterparty,
+    balance_paise: balance ? rupeesToPaise(balance) : null,
+  };
+  const confidence = m && onDate && data.amount_paise ? "high" : "low";
+  return { source: "bank", kind: "bank_alert", external_ref: reference, data, confidence };
+}
+
 /** Airpay payment-gateway "transaction successful" email → routes to the Payments screen, never the booking inbox. */
 export function parseAirpay(subject: string, body: string): ParsedEmail {
   const order = grab(body, /Order(?: (?:ID|No\.?))?\s*:?\s*#?\s*([0-9]{8,})/i) ?? grab(subject, /([0-9]{10,})/);
@@ -170,6 +193,8 @@ export function parseInboundEmail(from: string, rawSubject: string, html?: strin
   const looksStaah = f.includes("staah") || fwdFrom.includes("staah") || /staah/i.test(subject) || (/Channel Name\s*:/i.test(body) && /Booking\s*Id#?/i.test(body));
   const looksSwiftbook = f.includes("swiftbook") || fwdFrom.includes("swiftbook") || /swiftbook/i.test(subject) || /Itinerary(?: (?:No|Number|ID))?\.?\s*:?\s*#?\s*\d{6,}/i.test(body);
   const looksAirpay = f.includes("airpay") || fwdFrom.includes("airpay") || /airpay/i.test(subject);
+  const looksBank = f.includes("idfcfirstbank") || fwdFrom.includes("idfcfirstbank") || /transaction alert from .*bank/i.test(subject) || (/has been (credited|debited) with (INR|Rs)/i.test(body) && /A\/C/i.test(body));
+  if (looksBank) return parseBankAlert(subject, body);
   const looksEngine = f.includes("mybookingsite") || fwdFrom.includes("mybookingsite") || (/^\s*\((Confirmed|Cancelled|Canceled|Modified)\)/i.test(subject) && /Reservation\s*No/i.test(subject)) || (/Booking Confirmation/i.test(body) && /Booking ID/i.test(body) && /Guest Information/i.test(body));
   if (looksEngine) return parseBookingEngine(subject, body, year);
   if (looksStaah) return parseStaah(subject, body, year);

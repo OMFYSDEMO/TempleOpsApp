@@ -81,7 +81,8 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
             {d.total_incl_gst_paise != null && <Row label="Total incl. GST" value={inr(d.total_incl_gst_paise)} />}
             {d.commission_paise != null && <Row label="OTA commission" value={inr(d.commission_paise)} />}{d.commission_bp != null && <Row label="Commission" value={`${d.commission_bp / 100}%`} />}
             {d.collection_type && <Row label="Collection" value={d.collection_type.replace("_", " ")} />}
-            {d.order_id && <Row label="Order" value={<span className="mono">{d.order_id}</span>} />}{d.amount_paise != null && <Row label="Amount" value={inr(d.amount_paise)} />}
+            {d.order_id && <Row label="Order" value={<span className="mono">{d.order_id}</span>} />}{d.amount_paise != null && <Row label={d.direction ? `${d.direction === "debited" ? "Debit" : "Credit"} · ${d.bank ?? "bank"} ···${d.account_last ?? ""}` : "Amount"} value={inr(d.amount_paise)} />}
+            {d.counterparty && <Row label={d.direction === "debited" ? "Paid to" : "Received from"} sub={[d.method, d.reference].filter(Boolean).join(" ")} value={d.counterparty} />}{d.balance_paise != null && <Row label="Bank balance after" value={inr(d.balance_paise)} />}
             {it.status !== "pending" && <div className="sub">From {it.from_addr} · {it.subject}</div>}
           </div>
           {it.status === "pending" && it.kind === "new_reservation" && opts.length > 0 && <div>
