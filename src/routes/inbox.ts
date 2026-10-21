@@ -2,7 +2,7 @@ import { newRouter, requireCap, body, str, optStr, int, date } from "../app";
 import { Batch, HttpError, all, one, id, loadProperty } from "../db";
 import { nowIso } from "../domain/dates";
 import { splitInclusive } from "../domain/money";
-import PostalMime from "postal-mime";
+import { readRawEmail } from "../email/raw";
 import { parseInboundEmail, PARSER_VERSION, type ParsedEmail } from "../email/parsers";
 import { createBooking, gstPolicy, conflicts } from "../services/bookings";
 import { autoApply, REF_MATCH, refArgs } from "../services/inboxAuto";
@@ -111,7 +111,7 @@ export async function reparseItem(env: Env, propertyId: string, itemId: string, 
   if (!["pending", "routed"].includes(item.status)) throw new HttpError(409, `item is ${item.status}`);
   let from = item.from_addr ?? "", subject = item.subject ?? "", html: string | undefined, text: string | undefined;
   const obj = item.raw_key ? await env.FILES.get(item.raw_key) : null;
-  if (obj && item.raw_key.endsWith(".eml")) { const m = await PostalMime.parse(await obj.arrayBuffer()); from = m.from?.address ?? from; subject = m.subject ?? subject; html = m.html ?? undefined; text = m.text ?? undefined; }
+  if (obj && item.raw_key.endsWith(".eml")) { const m = await readRawEmail(await obj.arrayBuffer()); from = m.from || from; subject = m.subject || subject; html = m.html; text = m.text; }
   else if (obj) { const j = JSON.parse(await obj.text()); from = j.from ?? from; subject = j.subject ?? subject; text = j.text ?? undefined; html = j.html ?? undefined; }
   else { const d = JSON.parse(item.parsed_json ?? "{}"); text = d.preview ?? ""; }
   const parsed = parseInboundEmail(from, subject, html, text);
