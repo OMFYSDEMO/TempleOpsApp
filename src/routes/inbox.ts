@@ -156,7 +156,7 @@ r.post("/:id/approve", async (c) => {
   const x = await body(c).catch(() => ({} as Record<string, unknown>));
   const d = { ...JSON.parse(item.parsed_json ?? "{}"), ...((x.parsed as object) ?? {}) };
   if (item.kind === "new_reservation") {
-    const channelCode = str(x.channel_code ?? (item.source === "swiftbook" ? "swiftbook" : d.channel ? String(d.channel).toLowerCase().replace(/[^a-z]+/g, "_") : ""), "channel_code");
+    const channelCode = str(x.channel_code ?? (item.source === "swiftbook" ? "swiftbook" : item.source === "bookingengine" ? "direct" : d.channel ? String(d.channel).toLowerCase().replace(/[^a-z]+/g, "_") : ""), "channel_code");
     const roomIds: string[] = Array.isArray(x.room_ids) ? x.room_ids.map(String) : [];
     if (!roomIds.length) throw new HttpError(400, "pick the room(s) this reservation occupies");
     const checkIn = date(d.check_in, "check_in"), checkOut = date(d.check_out, "check_out");

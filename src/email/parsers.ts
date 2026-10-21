@@ -1,10 +1,10 @@
 import { rupeesToPaise } from "../domain/money";
 import { parseLooseDate } from "../domain/dates";
 
-export const PARSER_VERSION = "2026-10-4";
+export const PARSER_VERSION = "2026-10-21";
 
 export interface ParsedEmail {
-  source: "staah" | "swiftbook" | "airpay" | "unknown";
+  source: "staah" | "swiftbook" | "airpay" | "bookingengine" | "unknown";
   kind: "new_reservation" | "modification" | "cancellation" | "payment" | "unknown";
   external_ref: string | null;
   data: Record<string, unknown>;
@@ -16,7 +16,7 @@ const clean = (s: string) => s.replace(/\s+/g, " ").trim();
 function textOf(html: string | undefined, text: string | undefined): string {
   if (text && text.trim()) return text;
   if (!html) return "";
-  return html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|tr|li|h\d)>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/[ \t]+/g, " ");
+  return html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|tr|li|h\d)>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&zwnj;|&zwj;|&#8204;|&#8205;|\u200c|\u200d/g, "").replace(/&middot;|&#183;/g, "·").replace(/&rarr;|&#8594;/g, "→").replace(/&mdash;|&#8212;/g, "—").replace(/&bull;|&#8226;/g, "•").replace(/&amp;/g, "&").replace(/&rsquo;|&#8217;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/[ \t]+/g, " ");
 }
 
 function grab(body: string, re: RegExp): string | null {
@@ -112,6 +112,41 @@ export function parseSwiftbook(subject: string, body: string, year: number): Par
   return { source: "swiftbook", kind, external_ref: itin, data, confidence };
 }
 
+/**
+ * STAAH booking engine (mybookingsite.io) "Booking Confirmation": a direct booking made on the hotel's own
+ * website. Subject "(Confirmed) <guest> Reservation No:<id>-<hotel>"; body carries Booking ID, guest name,
+ * email and phone, the room type, check-in/out as "21 Oct 2026", "<guest> · 2 adults", Total and Amount Paid.
+ * Channel is Direct; any online payment arrives separately as an Airpay email.
+ */
+export function parseBookingEngine(subject: string, body: string, year: number): ParsedEmail {
+  const status = (subject.match(/^\s*\((Confirmed|Cancelled|Canceled|Modified|Amended)\)/i)?.[1] ?? grab(body, /Booking ID\s*\n?\s*[0-9]{6,}\s*\n?\s*(Confirmed|Cancelled|Canceled|Modified)/i) ?? "").toLowerCase();
+  const kind: ParsedEmail["kind"] = /cancel/.test(status) || /cancel/i.test(subject) ? "cancellation" : /modif|amend/.test(status) ? "modification" : "new_reservation";
+  const ref = grab(subject, /Reservation\s*No\.?\s*:?\s*([0-9]{6,})/i) ?? grab(body, /Booking ID\s*\n?\s*([0-9]{6,})/i);
+  const guest = grab(subject, /^\s*\([A-Za-z]+\)\s*(.+?)\s+Reservation\s*No/i) ?? grab(body, /Guest Information\s*\n?\s*([^\n]+)/i);
+  const email = grab(body, /Guest Information[\s\S]{0,200}?([\w.+-]+@[\w-]+\.[\w.-]+)/i);
+  const phone = grab(body, /Guest Information[\s\S]{0,260}?(\+?[0-9][0-9 \-]{8,}[0-9])/i);
+  const dateRe = /(\d{1,2}\s*[A-Za-z]{3,9}\.?,?\s*\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/;
+  const ci = grab(body, new RegExp("Check[- ]?in\\s*\\n?\\s*" + dateRe.source, "i"));
+  const co = grab(body, new RegExp("Check[- ]?out\\s*\\n?\\s*" + dateRe.source, "i"));
+  const adults = grab(body, /(\d+)\s*adults?/i);
+  const children = grab(body, /(\d+)\s*child(?:ren)?/i);
+  // Room types are listed under "Rooms" each followed by an INR amount; the first "<Room> -" line names the type.
+  const roomsBlock = body.match(/\n\s*Rooms\s*\n([\s\S]*?)\n\s*Sub\s*Total/i)?.[1] ?? "";
+  const roomLines = roomsBlock.split(/\n/).map((l) => l.trim()).filter((l) => l && !/^INR/i.test(l) && !/^[\d,.\s]+$/.test(l));
+  const roomName = roomLines[0] ?? grab(body, /Thank you for booking with us\.?\s*\n?\s*([A-Za-z][^\n-]{2,40}?)\s*-\s*\n/i);
+  const total = grab(body, /\n\s*Total\s*\n?\s*INR\s*([\d,]+\.?\d*)/i);
+  const paid = grab(body, /Amount Paid\s*\n?\s*INR\s*([\d,]+\.?\d*)/i);
+  const data = {
+    channel: "Direct", collection_type: "direct", vendor: "booking engine", status_text: status || null,
+    guest_name: guest, guest_email: email, guest_phone: phone, room_name: roomName ? clean(roomName) : null, rooms: Math.max(1, roomLines.length || 1),
+    adults: adults ? Number(adults) : null, children: children ? Number(children) : null,
+    check_in: ci ? parseLooseDate(ci.replace(/,/g, ""), year) : null, check_out: co ? parseLooseDate(co.replace(/,/g, ""), year) : null,
+    total_incl_gst_paise: total ? rupeesToPaise(total) : null, amount_paid_paise: paid ? rupeesToPaise(paid) : null,
+  };
+  const confidence = guest && ref && data.check_in && data.check_out && (kind === "cancellation" || data.total_incl_gst_paise !== null) ? "high" : "low";
+  return { source: "bookingengine", kind, external_ref: ref, data, confidence };
+}
+
 /** Airpay payment-gateway "transaction successful" email → routes to the Payments screen, never the booking inbox. */
 export function parseAirpay(subject: string, body: string): ParsedEmail {
   const order = grab(body, /Order(?: (?:ID|No\.?))?\s*:?\s*#?\s*([0-9]{8,})/i) ?? grab(subject, /([0-9]{10,})/);
@@ -132,6 +167,8 @@ export function parseInboundEmail(from: string, rawSubject: string, html?: strin
   const looksStaah = f.includes("staah") || fwdFrom.includes("staah") || /staah/i.test(subject) || (/Channel Name\s*:/i.test(body) && /Booking\s*Id#?/i.test(body));
   const looksSwiftbook = f.includes("swiftbook") || fwdFrom.includes("swiftbook") || /swiftbook/i.test(subject) || /Itinerary(?: (?:No|Number|ID))?\.?\s*:?\s*#?\s*\d{6,}/i.test(body);
   const looksAirpay = f.includes("airpay") || fwdFrom.includes("airpay") || /airpay/i.test(subject);
+  const looksEngine = f.includes("mybookingsite") || fwdFrom.includes("mybookingsite") || (/^\s*\((Confirmed|Cancelled|Canceled|Modified)\)/i.test(subject) && /Reservation\s*No/i.test(subject)) || (/Booking Confirmation/i.test(body) && /Booking ID/i.test(body) && /Guest Information/i.test(body));
+  if (looksEngine) return parseBookingEngine(subject, body, year);
   if (looksStaah) return parseStaah(subject, body, year);
   if (looksSwiftbook) return parseSwiftbook(subject, body, year);
   if (looksAirpay) return parseAirpay(subject, body);

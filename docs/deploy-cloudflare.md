@@ -136,6 +136,8 @@ Once mail reaches the Worker, the inbox runs itself: a STAAH reservation books t
 
 The parsers were written against the common STAAH, SwiftBook and Airpay templates; every email's raw `.eml` is kept in R2 (`inbox/…`), so when a template differs, nothing is lost: the card shows what was read, a person corrects it, and the parser can be tuned from the stored sample.
 
+The STAAH booking engine's own confirmations for website bookings (from noreply@mybookingsite.io, subject "(Confirmed) … Reservation No: …") are read as Direct bookings; "(Cancelled)" releases the stay. Any email the reader cannot place still shows a "Book by hand in Reservations" button on its card.
+
 ## 9. Lead hooks (CRM, website form, Instagram and Facebook lead forms)
 
 **If a CRM such as NeoDove already receives Instagram, Facebook, WhatsApp and website enquiries, use it as the only front door** and skip the Meta app below: wiring both would open every lead twice. In the CRM's admin portal → Integrations → Webhook, add a webhook on *lead created* and *lead updated* (or on the stage you consider a real enquiry, such as "Interested" or "Quote requested") with method POST and this URL:

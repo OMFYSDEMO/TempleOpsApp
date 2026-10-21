@@ -66,8 +66,15 @@ r.post("/", requireCap("bookings_write"), async (c) => {
     checkIn: date(x.check_in, "check_in"), checkOut: date(x.check_out, "check_out"),
     adults: int(x.adults ?? 2, "adults", { min: 1 }), children: int(x.children ?? 0, "children", { min: 0, optional: true }),
     rooms: rooms.map((rm) => ({ roomId: str(rm.room_id, "rooms[].room_id"), nightlyRatePaise: int(rm.nightly_rate_paise, "rooms[].nightly_rate_paise", { min: 0 }) })),
-    notes: optStr(x.notes, "notes"), isOta: (optStr(x.channel_code, "channel_code") ?? "direct") !== "direct",
+    notes: optStr(x.notes, "notes"), isOta: (optStr(x.channel_code, "channel_code") ?? "direct") !== "direct", inboxItemId: optStr(x.inbox_item_id, "inbox_item_id"),
   });
+  const inboxId = optStr(x.inbox_item_id, "inbox_item_id");
+  if (inboxId) {
+    const b = new Batch(c.env.DB, actor);
+    b.add("UPDATE inbox_items SET status = 'approved', booking_id = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ? AND property_id = ? AND status = 'pending'", result.id, actor.id, nowIso(), inboxId, p.id);
+    b.audit("inbox.approve", "inbox_item", inboxId, { status: "pending" }, { status: "approved", booking_id: result.id, by_hand: true });
+    await b.run();
+  }
   return c.json({ booking: result }, 201);
 });
 

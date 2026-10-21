@@ -112,3 +112,52 @@ describe("Inbox automation", () => {
     expect((await api("prachi", "PATCH", "/api/admin/property", { inbox_automation: false })).status).toBe(403);
   });
 });
+
+describe("STAAH booking engine (website) confirmations", () => {
+  beforeAll(seed);
+  const html = (id: string, guest: string, room: string, ci: string, co: string, total: string, paid = "0.00") => `<html><body><table><tr><td>Booking Confirmation &mdash; The Meadows Varkala</td></tr>
+<tr><td>The Meadows Varkala</td></tr><tr><td>meadowsvarkala@gmail.com 133/B, Marakkadamukku, Varkala</td></tr>
+<tr><td>Booking ID</td></tr><tr><td>${id}</td></tr><tr><td>Confirmed</td></tr>
+<tr><td>Guest Information</td></tr><tr><td>${guest}</td></tr><tr><td>guest@example.com</td></tr><tr><td>+91 09920031314</td></tr>
+<tr><td>Dear ${guest} , Greetings from The Meadows !</td></tr><tr><td>Thank you for booking with us.</td></tr>
+<tr><td>${room} - </td></tr><tr><td>Check-in</td></tr><tr><td>${ci.split(" ").join("&zwnj; ")}</td></tr><tr><td>ETA 02&zwnj;:&zwnj;00&zwnj; PM</td></tr><tr><td>&rarr;</td></tr>
+<tr><td>Check-out</td></tr><tr><td>${co.split(" ").join("&zwnj; ")}</td></tr><tr><td>12&zwnj;:&zwnj;00&zwnj; PM</td></tr>
+<tr><td>${guest} &middot; 2 adults</td></tr><tr><td>${ci}</td></tr><tr><td>INR ${total}</td></tr><tr><td>Total</td></tr><tr><td>INR ${total}</td></tr>
+<tr><td>Cancellation Policy Room 1 :- &bull; The guest shall be charged the total price if cancelled.</td></tr>
+<tr><td>Rooms</td></tr><tr><td>${room}</td></tr><tr><td>INR ${total}</td></tr><tr><td>Sub Total</td></tr><tr><td>INR ${total}</td></tr><tr><td>Total</td></tr><tr><td>INR ${total}</td></tr>
+<tr><td>Amount Paid</td></tr><tr><td>INR ${paid}</td></tr><tr><td>We are excited to host you !</td></tr></table></body></html>`;
+
+  it("reads the template (zero-width joiners and all) and books a direct stay into the matching room type", async () => {
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@mybookingsite.io", subject: "(Confirmed) Anita Menon Reservation No:1060900000105200-The Meadows Varkala", html: html("1060900000105200", "Anita Menon", "Premium Lawn View", "12 Feb 2027", "14 Feb 2027", "13,650.00") });
+    expect(ing.parsed.source).toBe("bookingengine"); expect(ing.parsed.kind).toBe("new_reservation");
+    expect(ing.parsed.external_ref).toBe("1060900000105200");
+    expect(ing.parsed.data).toMatchObject({ channel: "Direct", guest_name: "Anita Menon", guest_email: "guest@example.com", room_name: "Premium Lawn View", rooms: 1, adults: 2, check_in: "2027-02-12", check_out: "2027-02-14", total_incl_gst_paise: 1365000, amount_paid_paise: 0 });
+    expect(ing.parsed.data.guest_phone).toMatch(/9920031314/);
+    expect(ing.parsed.confidence).toBe("high");
+    // ₹13,650 incl. GST for 2 nights → ₹6,500/night ex-GST on the unregistered seed = the Premium tariff → books itself.
+    expect(ing.status).toBe("approved"); expect(ing.auto.what).toBe("booked");
+    const bk = (await sql("SELECT channel_id, status, external_ref FROM bookings WHERE id = ?", ing.booking_id))[0];
+    expect(bk).toMatchObject({ channel_id: "ch_direct", external_ref: "1060900000105200" });
+    expect((await sql("SELECT room_id FROM room_nights WHERE booking_id = ?", ing.booking_id))[0].room_id).toBe("loc_r2");
+  });
+
+  it("a room type AVOS does not know waits for a person, and 'book by hand' from Reservations closes the card", async () => {
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@mybookingsite.io", subject: "(Confirmed) Test Test Reservation No:1060900000105133-The Meadows Varkala", html: html("1060900000105133", "Test Test", "Villa", "20 Mar 2027", "21 Mar 2027", "1.00") });
+    expect(ing.status).toBe("pending");
+    expect(ing.parsed.data.room_name).toBe("Villa");
+    const card = (await ok("prachi", "GET", "/api/inbox?status=pending")).items.find((i: any) => i.id === ing.id);
+    expect(card.room_options.length).toBe(4); expect(card.suggested_room_ids).toEqual([]);
+    // Sales books it by hand in Reservations, naming the email: the card is marked done with the booking.
+    const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Test Test", guest_phone: "9920031314", check_in: "2027-03-20", check_out: "2027-03-21", channel_code: "direct", external_ref: "1060900000105133", rooms: [{ room_id: "loc_r4", nightly_rate_paise: 700000 }], inbox_item_id: ing.id });
+    const after = (await sql("SELECT status, booking_id FROM inbox_items WHERE id = ?", ing.id))[0];
+    expect(after).toMatchObject({ status: "approved", booking_id: b.booking.id });
+    expect((await ok("prachi", "GET", "/api/inbox?status=pending")).items.find((i: any) => i.id === ing.id)).toBeUndefined();
+  });
+
+  it("a cancelled confirmation releases the stay", async () => {
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@mybookingsite.io", subject: "(Cancelled) Anita Menon Reservation No:1060900000105200-The Meadows Varkala", html: html("1060900000105200", "Anita Menon", "Premium Lawn View", "12 Feb 2027", "14 Feb 2027", "13,650.00").replace("<tr><td>Confirmed</td></tr>", "<tr><td>Cancelled</td></tr>") });
+    expect(ing.parsed.kind).toBe("cancellation");
+    expect(ing.status).toBe("approved"); expect(ing.auto.what).toBe("cancelled");
+    expect((await sql("SELECT status FROM bookings WHERE external_ref = '1060900000105200'"))[0].status).toBe("cancelled");
+  });
+});

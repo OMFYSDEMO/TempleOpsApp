@@ -35,6 +35,7 @@ const norm = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g
 /** Match the email's channel name to a configured channel; hotel-collect emails prefer the "(pay at property)" twin. */
 async function resolveChannel(db: D1Database, propertyId: string, parsed: ParsedEmail): Promise<{ code: string } | null> {
   if (parsed.source === "swiftbook") return await one<{ code: string }>(db, "SELECT code FROM channels WHERE property_id = ? AND code = 'swiftbook' AND active = 1", propertyId);
+  if (parsed.source === "bookingengine") return await one<{ code: string }>(db, "SELECT code FROM channels WHERE property_id = ? AND code = 'direct' AND active = 1", propertyId);
   const want = norm(parsed.data.channel);
   if (!want) return null;
   const rows = await all<{ code: string; name: string; collection_type: string }>(db, "SELECT code, name, collection_type FROM channels WHERE property_id = ? AND active = 1", propertyId);

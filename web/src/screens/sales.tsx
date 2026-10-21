@@ -96,6 +96,7 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
           <Btn onClick={() => run(async () => { const r = await post(`/inbox/${it.id}/reparse`); await q.reload(); toast(r.auto?.applied ? `Applied automatically: ${r.auto.what}` : r.auto?.note ? `Read again · still waiting: ${r.auto.note}` : `Read again · ${r.status}`); })}>Re-read</Btn>
           {it.kind === "new_reservation" && <Btn kind="primary" disabled={sel.length === 0 || !ratePaise} onClick={() => book(it)}>{sel.length ? `Book ${selNames}${ratePaise ? ` @ ${inr(ratePaise)}/night` : ""}` : "Pick a room to book"}</Btn>}
           {it.kind === "cancellation" && <Btn kind="primary" onClick={() => book(it)}>Cancel the booking</Btn>}
+          {it.kind !== "cancellation" && it.kind !== "payment" && <Btn kind={it.kind === "new_reservation" ? undefined : "primary"} onClick={() => { try { sessionStorage.setItem("avos.bookFromInbox", JSON.stringify({ inbox_item_id: it.id, subject: it.subject, guest_name: d.guest_name ?? "", guest_phone: d.guest_phone ?? "", guest_email: d.guest_email ?? "", check_in: d.check_in ?? "", check_out: d.check_out ?? "", adults: d.adults ?? 2, children: d.children ?? 0, channel_code: it.source === "bookingengine" || it.source === "swiftbook" ? (it.source === "swiftbook" ? "swiftbook" : "direct") : (d.channel ? String(d.channel).toLowerCase().replace(/[^a-z]+/g, "_") : "direct"), external_ref: it.external_ref ?? "", notes: `from email: ${it.subject}` })); } catch {} location.hash = "#resv"; }}>Book by hand in Reservations</Btn>}
         </div>}
         {it.booking_id && <div className="muted">Booking {it.booking_id}{it.booking_status ? ` · ${it.booking_status.replace("_", " ")}` : ""} · see Reservations</div>}
       </Card>;
@@ -169,7 +170,9 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   const q = useLoad(() => get("/bookings"), []);
   const rooms = refs.locations.filter((l) => l.kind === "room");
   const today = me.property.today;
-  const [f, setF] = useState<any>({ guest_name: "", guest_phone: "", guest_email: "", notes: "", check_in: today, check_out: addDays(today, 1), adults: 2, children: 0, channel_code: "direct", rooms: {} as Record<string, string> });
+  const prefill = (() => { try { const s = sessionStorage.getItem("avos.bookFromInbox"); return s ? JSON.parse(s) : null; } catch { return null; } })();
+  const [fromInbox, setFromInbox] = useState<any>(prefill);
+  const [f, setF] = useState<any>({ guest_name: prefill?.guest_name ?? "", guest_phone: prefill?.guest_phone ?? "", guest_email: prefill?.guest_email ?? "", notes: prefill?.notes ?? "", check_in: prefill?.check_in || today, check_out: prefill?.check_out || addDays(prefill?.check_in || today, 1), adults: prefill?.adults ?? 2, children: prefill?.children ?? 0, channel_code: prefill?.channel_code ?? "direct", external_ref: prefill?.external_ref ?? "", rooms: {} as Record<string, string> });
   const [open, setOpen] = useState<string | null>(null);
   const [filter, setFilter] = useState<"upcoming" | "inhouse" | "past" | "cancelled" | "all">("upcoming");
   const [search, setSearch] = useState("");
@@ -182,7 +185,8 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   const canSave = totals.rooms > 0 && totals.nights > 0 && f.guest_name.trim().length > 1 && Object.values(f.rooms as Record<string, string>).every((v) => v === "" || Number(v) >= 0);
   const save = () => run(async () => {
     const rs = Object.entries(f.rooms as Record<string, string>).filter(([, v]) => v !== "").map(([room_id, v]) => ({ room_id, nightly_rate_paise: Math.round(Number(v) * 100) }));
-    const r = await post("/bookings", { ...f, rooms: rs });
+    const r = await post("/bookings", { ...f, rooms: rs, inbox_item_id: fromInbox?.inbox_item_id ?? undefined });
+    if (fromInbox) { try { sessionStorage.removeItem("avos.bookFromInbox"); } catch {} setFromInbox(null); }
     toast(r.booking.status === "approved" ? `Booked · ${inr(r.booking.grossPaise)} gross · approved` : `Booked · awaiting approval (${r.booking.approval.reasons.join(", ")})`);
     setF({ ...f, guest_name: "", guest_phone: "", guest_email: "", notes: "", rooms: {} }); await q.reload(); setOpen(r.booking.id);
   });
@@ -198,6 +202,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   return <>
     <h2>Reservations <small>pick the dates, tap the rooms, the money adds itself up · on-tariff bookings approve themselves, exceptions go to the revenue desk</small></h2>
     <Card title="New booking" sub="three steps: the stay, the rooms, the guest">
+      {fromInbox && <div className="note">Booking by hand from the email <b>{fromInbox.subject}</b>. Whatever the email carried is filled in below; check the dates, tap the room, save. The inbox card is marked done when you save. <a href="#inbox" onClick={() => { try { sessionStorage.removeItem("avos.bookFromInbox"); } catch {} setFromInbox(null); }}>Cancel and go back</a></div>}
       <div className="section"><div className="sectionhead"><b>1 · Stay</b><span className="sub">{totals.nights > 0 ? `${totals.nights} night${totals.nights > 1 ? "s" : ""} · ${fmtDate(f.check_in)} → ${fmtDate(f.check_out)}` : "check-out must be after check-in"}</span></div>
         <div className="form-grid four">
           <Field label="Check-in"><input type="date" value={f.check_in} onChange={(e: any) => { const ci = e.currentTarget.value; setF({ ...f, check_in: ci, check_out: f.check_out <= ci ? addDays(ci, 1) : f.check_out, rooms: {} }); }} /></Field>
