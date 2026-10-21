@@ -161,3 +161,12 @@ describe("STAAH booking engine (website) confirmations", () => {
     expect((await sql("SELECT status FROM bookings WHERE external_ref = '1060900000105200'"))[0].status).toBe("cancelled");
   });
 });
+
+describe("booking engine · room line with the amount on the same line", () => {
+  it("drops the INR amount from the room name", async () => {
+    const { parseInboundEmail } = await import("../src/email/parsers");
+    const r = parseInboundEmail("noreply@mybookingsite.io", "(Confirmed) X Y Reservation No:1060900000105310-The Meadows Varkala", undefined,
+      "Booking Confirmation\nBooking ID\n1060900000105310\nConfirmed\nGuest Information\nX Y\nx@example.com\n+91 09920031314\nThank you for booking with us.\nPremium Lawn View -\nCheck-in\n28 Oct 2026\nCheck-out\n29 Oct 2026\nX Y · 2 adults\nTotal\nINR 1.00\nRooms\nPremium Lawn View INR 1.00\nSub Total\nINR 1.00\nTotal\nINR 1.00\nAmount Paid\nINR 0.00");
+    expect(r.data.room_name).toBe("Premium Lawn View"); expect(r.data.rooms).toBe(1); expect(r.data.check_in).toBe("2026-10-28");
+  });
+});

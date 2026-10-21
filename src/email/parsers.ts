@@ -132,13 +132,13 @@ export function parseBookingEngine(subject: string, body: string, year: number):
   const children = grab(body, /(\d+)\s*child(?:ren)?/i);
   // Room types are listed under "Rooms" each followed by an INR amount; the first "<Room> -" line names the type.
   const roomsBlock = body.match(/\n\s*Rooms\s*\n([\s\S]*?)\n\s*Sub\s*Total/i)?.[1] ?? "";
-  const roomLines = roomsBlock.split(/\n/).map((l) => l.trim()).filter((l) => l && !/^INR/i.test(l) && !/^[\d,.\s]+$/.test(l));
+  const roomLines = roomsBlock.split(/\n|(?=INR\s*[\d,]+)/).map((l) => l.replace(/^\s*INR\s*[\d,]+\.?\d*\s*/i, "").trim()).filter((l) => l && !/^INR/i.test(l) && !/^[\d,.\s]+$/.test(l));
   const roomName = roomLines[0] ?? grab(body, /Thank you for booking with us\.?\s*\n?\s*([A-Za-z][^\n-]{2,40}?)\s*-\s*\n/i);
   const total = grab(body, /\n\s*Total\s*\n?\s*INR\s*([\d,]+\.?\d*)/i);
   const paid = grab(body, /Amount Paid\s*\n?\s*INR\s*([\d,]+\.?\d*)/i);
   const data = {
     channel: "Direct", collection_type: "direct", vendor: "booking engine", status_text: status || null,
-    guest_name: guest, guest_email: email, guest_phone: phone, room_name: roomName ? clean(roomName) : null, rooms: Math.max(1, roomLines.length || 1),
+    guest_name: guest, guest_email: email, guest_phone: phone, room_name: roomName ? clean(roomName).replace(/\s*INR\s*[\d,]+\.?\d*\s*$/i, "").trim() || null : null, rooms: Math.max(1, roomLines.length || 1),
     adults: adults ? Number(adults) : null, children: children ? Number(children) : null,
     check_in: ci ? parseLooseDate(ci.replace(/,/g, ""), year) : null, check_out: co ? parseLooseDate(co.replace(/,/g, ""), year) : null,
     total_incl_gst_paise: total ? rupeesToPaise(total) : null, amount_paid_paise: paid ? rupeesToPaise(paid) : null,
