@@ -1,1 +1,1 @@
-{ "name": "AVOS", "short_name": "AVOS", "start_url": "/", "display": "standalone", "background_color": "#F5F7FB", "theme_color": "#185c48", "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
+{ "name": "AVOS", "short_name": "AVOS", "start_url": "/", "display": "standalone", "background_color": "#f4f5fa", "theme_color": "#7c6cf2", "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
