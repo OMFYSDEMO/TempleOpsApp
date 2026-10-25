@@ -116,7 +116,8 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
     }
     if (item.kind === "payment") {
       if (parsed.confidence !== "high" || !d.success) return { applied: false, note: "not a confirmed successful transaction" };
-      const dup = await one<{ id: string }>(db, "SELECT id FROM payments WHERE property_id = ? AND method = 'airpay' AND reference = ? AND status != 'void'", property.id, String(d.order_id));
+      // Already recorded under either number: the desk often types the Airpay Id rather than the order id.
+      const dup = await one<{ id: string }>(db, "SELECT id FROM payments WHERE property_id = ? AND method = 'airpay' AND reference IN (?, ?) AND status != 'void'", property.id, String(d.order_id), String(d.airpay_id ?? d.order_id));
       if (dup) {
         const b = new Batch(db, actor);
         b.add("UPDATE inbox_items SET status = 'duplicate', payment_id = ?, auto_note = 'already recorded' WHERE id = ?", dup.id, item.id);

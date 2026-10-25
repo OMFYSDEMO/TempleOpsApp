@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
+import { parseInboundEmail } from "../src/email/parsers";
 import { seed, api, ok, sql } from "./helpers";
 
 // Inbox automation (W1): emails apply themselves when the facts line up, and wait with a reason when they do not.
@@ -75,6 +76,19 @@ describe("Inbox automation", () => {
     expect(stray.status).toBe("routed"); expect(stray.auto.note).toMatch(/no stay matches/);
     const gw = await ok("sindhu", "GET", "/api/payments/gateway-inbox");
     expect(gw.items.find((i: any) => i.id === stray.id)).toBeTruthy();
+  });
+
+  it("reads Airpay's real receipt forwarded from Zoho, and knows a payment already recorded under the Airpay Id", async () => {
+    const receipt = "Kind Regards,\nThe Meadows | Varkala\n============ Forwarded message ============\nINR 20000.00\nCollected Successfully\nPAYMENT DETAILS\nMerchant Name\nMeadows Varkala\nOrder ID\n10609000001099990000001\nCustomer Name\nTEST GUEST\nOrder Amount\nINR 20000.00\nSurcharge\nINR 0.00\nBilled Amount\nINR 20000.00\nAirpay Id\n2099999001\nhttps://nps.airpay.co.in/view.php?id=1";
+    const parsed = parseInboundEmail("bookings@meadowsvarkala.com", "Fwd: Congratulations! Order ID 10609000001099990000001 Transaction is Successful", undefined, receipt);
+    expect(parsed.source).toBe("airpay"); expect(parsed.confidence).toBe("high");
+    expect(parsed.data).toMatchObject({ order_id: "10609000001099990000001", airpay_id: "2099999001", amount_paise: 2000000, payer_name: "TEST GUEST", success: true });
+    // The desk had already recorded it by hand with the Airpay Id as the reference.
+    const bk = await ok("shaji", "POST", "/api/bookings", { guest_name: "Test Guest", guest_phone: "9500000077", channel_code: "direct", check_in: "2027-06-01", check_out: "2027-06-03", rooms: [{ room_id: "loc_r1", nightly_rate_paise: 1000000 }] });
+    await ok("sindhu", "POST", "/api/payments", { booking_id: bk.booking.id, method: "airpay", amount_paise: 2000000, reference: "2099999001" });
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "bookings@meadowsvarkala.com", subject: "Fwd: Congratulations! Order ID 10609000001099990000001 Transaction is Successful", text: receipt, message_id: "<zoho-fwd-airpay@test>" });
+    expect(ing.status).toBe("duplicate");
+    expect((await sql("SELECT COUNT(*) AS n FROM payments WHERE booking_id = ? AND status != 'void'", bk.booking.id))[0].n).toBe(1);
   });
 
   it("reads a Gmail-forwarded STAAH notification in the real label-above-value layout and books it", async () => {

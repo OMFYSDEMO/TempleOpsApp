@@ -183,10 +183,14 @@ export function parseBankAlert(subject: string, body: string): ParsedEmail {
 /** Airpay payment-gateway "transaction successful" email → routes to the Payments screen, never the booking inbox. */
 export function parseAirpay(subject: string, body: string): ParsedEmail {
   const order = grab(body, /Order(?: (?:ID|No\.?))?\s*:?\s*#?\s*([0-9]{8,})/i) ?? grab(subject, /([0-9]{10,})/);
-  const amount = grab(body, /(?:Amount|₹)\s*:?\s*₹?\s*([\d,]+\.?\d*)/i);
+  // Airpay's receipt lays labels above values: "Order Amount / INR 20000.00", "Billed Amount", "Airpay Id / 2091754834".
+  const money = "(?:INR|Rs\\.?|₹)?\\s*₹?\\s*([\\d,]+\\.?\\d*)";
+  const amount = grab(body, new RegExp(`Order Amount\\s*:?\\s*${money}`, "i")) ?? grab(body, new RegExp(`Billed Amount\\s*:?\\s*${money}`, "i"))
+    ?? grab(body, /(?:INR|Rs\.?|₹)\s*([\d,]+\.?\d*)\s*Collected Successfully/i) ?? grab(body, new RegExp(`(?:Amount|₹)\\s*:?\\s*${money}`, "i"));
+  const airpayId = grab(body, /Airpay\s*Id\s*:?\s*([0-9]{6,})/i);
   const payer = grab(body, /Payer(?: Name)?\s*:?\s*([^\n]+)/i) ?? grab(body, /Customer(?: Name)?\s*:?\s*([^\n]+)/i);
   const success = /success/i.test(subject + body);
-  const data = { order_id: order, amount_paise: amount ? rupeesToPaise(amount) : null, payer_name: payer, success };
+  const data = { order_id: order, airpay_id: airpayId, amount_paise: amount ? rupeesToPaise(amount) : null, payer_name: payer, success };
   return { source: "airpay", kind: "payment", external_ref: order, data, confidence: order && data.amount_paise && success ? "high" : "low" };
 }
 
@@ -199,7 +203,8 @@ export function parseInboundEmail(from: string, rawSubject: string, html?: strin
   const fwdFrom = (body.match(/From\s*:\s*.*?([\w.+-]+@[\w-]+\.[\w.-]+)/i)?.[1] ?? "").toLowerCase();
   const looksStaah = f.includes("staah") || fwdFrom.includes("staah") || /staah/i.test(subject) || (/Channel Name\s*:/i.test(body) && /Booking\s*Id#?/i.test(body));
   const looksSwiftbook = f.includes("swiftbook") || fwdFrom.includes("swiftbook") || /swiftbook/i.test(subject) || /Itinerary(?: (?:No|Number|ID))?\.?\s*:?\s*#?\s*\d{6,}/i.test(body);
-  const looksAirpay = f.includes("airpay") || fwdFrom.includes("airpay") || /airpay/i.test(subject);
+  // A Zoho forward hides the Airpay sender; the receipt's own "Airpay Id" line and airpay.co.in links still give it away.
+  const looksAirpay = f.includes("airpay") || fwdFrom.includes("airpay") || /airpay/i.test(subject) || (/Airpay\s*Id/i.test(body) && /airpay\.co\.in/i.test(body));
   const looksBank = f.includes("idfcfirstbank") || fwdFrom.includes("idfcfirstbank") || /transaction alert from .*bank/i.test(subject) || (/has been (credited|debited) with (INR|Rs)/i.test(body) && /A\/C/i.test(body));
   if (looksBank) return parseBankAlert(subject, body);
   const looksEngine = f.includes("mybookingsite") || fwdFrom.includes("mybookingsite") || (/^\s*\((Confirmed|Cancelled|Canceled|Modified)\)/i.test(subject) && /Reservation\s*No/i.test(subject)) || (/Booking Confirmation/i.test(body) && /Booking ID/i.test(body) && /Guest Information/i.test(body));
