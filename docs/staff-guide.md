@@ -46,7 +46,7 @@ Three habits that make everything else work:
 - Open it: the passport page, visa and arrival stamp are there. File on the FRRO portal, type the acknowledgement number into the box and press **Mark Form C filed**.
 
 ### You cannot
-See money beyond a booking's balance, edit an approved booking's amount, see expenses or P&L.
+See money beyond a booking's balance, edit an approved booking's amount, see expenses or P&L. Bank alerts and Airpay receipts go to the revenue desk, not your Inbox, and OTA commission terms are not shown to sales.
 
 ---
 
@@ -89,7 +89,7 @@ See money beyond a booking's balance, edit an approved booking's amount, see exp
 - Housekeeping, maintenance and anything else with a room or area, a title and a due date. Mark **done** with a photo where it helps. A maintenance bill paid from petty cash can be attached at the same time.
 
 ### You cannot
-Change a booking's rooms or rate (ask sales), record bank expenses, see P&L or settings.
+Change a booking's rooms or rate (ask sales), record bank expenses, see P&L or settings. You do not see bank balances, account numbers, OTA payouts or gateway charges: Payments shows the cash you hold (cash in hand, petty cash) and the collections you recorded.
 
 ---
 
@@ -103,6 +103,7 @@ Change a booking's rooms or rate (ask sales), record bank expenses, see P&L or s
 | Approval pending (below tariff, refund, amendment) | 4 h | Approvals → Approve or Return with a note |
 | OTA payout not settled | 7 days after check-out | OTA payouts → tick the stays on the statement, settle |
 | Bank statement line unmatched | 7 days | Smart Reconcile → accept or match |
+| Bank alert AVOS could not post | 2 h | Inbox → check which bank it is for (account digits under Settings) |
 | Anything sales let slip past its time | raised to you | Deal with it or send it back |
 
 ### Approvals
@@ -137,7 +138,7 @@ Record expenses, lock a month, change settings or see P&L.
 
 ## Accountant · Shubham
 
-**Your screens:** My work, Month close, GST filing sheet, Revenue overview, Guest invoices, Smart Reconcile (debits), Change log, Dashboard.
+**Your screens:** My work, Month close, GST filing sheet, Revenue overview, Guest invoices, Smart Reconcile (debits), Change log, Dashboard. You can read every financial register (payments, transfers between accounts, other income, OTA payouts, bank balances) but not record into them.
 
 **What is on your My work**
 | Item | Allowed wait | What to do |
@@ -148,7 +149,7 @@ Record expenses, lock a month, change settings or see P&L.
 ### Month close
 1. Revenue desk clears the pre-close exceptions and approves the month for close. You see the same list on Month close.
 2. **Lock** the month. From then on nobody, including the owner, can post into it; a correction goes into the current month with a note.
-3. The close pack (summary and registers as CSV) is kept for the month and can be downloaded.
+3. The close pack (summary and registers as CSV: bookings, payments, expenses, other income, transfers between accounts, invoices, credit notes, bank lines, OTA settlements) is kept for the month and can be downloaded.
 
 ### GST filing sheet
 - Taxable value by slab (nil up to ₹1,000 per room-night, 5% up to ₹7,500, 18% above), output GST, TCS to accept from the OTAs, TDS for 26AS, credit notes and advances. Everything is computed from the books; nothing is typed in.

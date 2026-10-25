@@ -23,6 +23,14 @@ export function requireCap(cap: keyof typeof CAN): MiddlewareHandler<AppEnv> {
   };
 }
 
+/** Allowed if the actor holds any one of the capabilities. */
+export function requireAny(...caps: (keyof typeof CAN)[]): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    if (!caps.some((cap) => allowed(c.get("actor"), cap))) throw new HttpError(403, `${c.get("actor").role} may not use ${caps.join(" or ")}`);
+    await next();
+  };
+}
+
 export function errorHandler(err: unknown, c: Context<AppEnv>) {
   if (err instanceof HttpError) return c.json({ error: err.message, detail: err.detail ?? null }, err.status as 400);
   console.error("unhandled", err);

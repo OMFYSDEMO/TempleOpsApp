@@ -9,9 +9,23 @@ import { autoApply, REF_MATCH, refArgs } from "../services/inboxAuto";
 import { slabBpForRoomNight } from "../domain/gst";
 import { isWholeVilla } from "../email/parsers";
 import type { Env } from "../env";
+import { allowed } from "../auth";
 
 const r = newRouter();
 r.use("*", requireCap("inbox"));
+
+// Bank alerts and gateway receipts carry balances and settlement amounts: the revenue desk, owner and CA only.
+const FINANCE_ITEM = "(i.kind IN ('bank_alert','payment') OR i.source IN ('bank','airpay'))";
+const isFinanceItem = (it: { kind: string; source: string }) => ["bank_alert", "payment"].includes(it.kind) || ["bank", "airpay"].includes(it.source);
+const guardItem = async (c: any, next: () => Promise<void>) => {
+  if (!allowed(c.get("actor"), "finance")) {
+    const it: any = await one(c.env.DB, "SELECT kind, source FROM inbox_items WHERE id = ? AND property_id = ?", c.req.param("id"), c.get("property").id);
+    if (it && isFinanceItem(it)) throw new HttpError(404, "inbox item not found");
+  }
+  await next();
+};
+r.use("/:id", guardItem);
+r.use("/:id/*", guardItem);
 
 /** Nightly rate ex-GST implied by the email, the same way Approve derives it. */
 function impliedNightly(p: any, d: Record<string, any>, roomsN: number): number | null {
@@ -30,11 +44,15 @@ function impliedNightly(p: any, d: Record<string, any>, roomsN: number): number 
 r.get("/", async (c) => {
   const p = c.get("property");
   const status = c.req.query("status") ?? "pending";
-  const rows = await all(c.env.DB, "SELECT i.*, b.status AS booking_status FROM inbox_items i LEFT JOIN bookings b ON b.id = i.booking_id WHERE i.property_id = ? AND i.status = ? ORDER BY i.received_at DESC LIMIT 100", p.id, status);
+  const fin = allowed(c.get("actor"), "finance");
+  const rows = await all(c.env.DB, `SELECT i.*, b.status AS booking_status FROM inbox_items i LEFT JOIN bookings b ON b.id = i.booking_id WHERE i.property_id = ? AND i.status = ? ${fin ? "" : `AND NOT ${FINANCE_ITEM}`} ORDER BY i.received_at DESC LIMIT 100`, p.id, status);
   const rooms = await all<{ id: string; name: string; code: string }>(c.env.DB, "SELECT id, name, code FROM locations WHERE property_id = ? AND kind = 'room' AND active = 1 ORDER BY sort, code", p.id);
   const items = [];
   for (const x of rows as any[]) {
     const d = x.parsed_json ? JSON.parse(x.parsed_json) : null;
+    // OTA commission from the channel's email is a commercial term, not something sales records.
+    if (d && !fin) { delete d.commission_paise; delete d.commission_bp; }
+    if (!fin) delete x.parsed_json;
     let room_options: unknown[] | null = null, suggested_room_ids: string[] = [], nightly_rate_paise: number | null = null;
     if (x.status === "pending" && x.kind === "new_reservation" && d?.check_in && d?.check_out && d.check_in < d.check_out) {
       const taken = await conflicts(c.env.DB, p.id, rooms.map((r) => r.id), d.check_in, d.check_out);

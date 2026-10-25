@@ -1,6 +1,7 @@
-import { newRouter, requireCap, body, str, optStr, int, date, oneOf, paise } from "../app";
+import { newRouter, requireCap, requireAny, body, str, optStr, int, date, oneOf, paise } from "../app";
 import { Batch, HttpError, all, one, id, assertPeriodOpen } from "../db";
 import { nowIso, todayIn } from "../domain/dates";
+import { allowed } from "../auth";
 import { applyBp } from "../domain/money";
 import { loadBooking, paidOnBooking } from "../services/bookings";
 import { recordPayment, METHODS } from "../services/payments";
@@ -29,14 +30,18 @@ r.get("/due", requireCap("payments"), async (c) => {
   return c.json({ due: due.sort((a: any, b: any) => Number(b.due_today) - Number(a.due_today)) });
 });
 
-r.get("/", requireCap("payments"), async (c) => {
+r.get("/", requireAny("payments", "finance"), async (c) => {
   const p = c.get("property");
+  const fin = allowed(c.get("actor"), "finance");
   const from = c.req.query("from"), to = c.req.query("to"), bookingId = c.req.query("booking_id");
   const where = ["p.property_id = ?"]; const params: unknown[] = [p.id];
+  // The front desk sees the collections it recorded itself: no OTA payouts, no advances the revenue desk or owner posted.
+  if (!fin) where.push("p.method != 'ota' AND p.recorded_by IN (SELECT id FROM users WHERE role = 'property')");
   if (from) { where.push("p.received_on >= ?"); params.push(date(from, "from")); }
   if (to) { where.push("p.received_on <= ?"); params.push(date(to, "to")); }
   if (bookingId) { where.push("p.booking_id = ?"); params.push(bookingId); }
   const rows = await all(c.env.DB, `SELECT p.*, g.name AS guest_name, a.name AS account_name, e.amount_paise AS fee_paise FROM payments p LEFT JOIN guests g ON g.id = p.guest_id JOIN money_accounts a ON a.id = p.account_id LEFT JOIN expenses e ON e.id = p.fee_expense_id WHERE ${where.join(" AND ")} ORDER BY p.received_on DESC, p.created_at DESC LIMIT 300`, ...params);
+  if (!fin) for (const r of rows as any[]) { delete r.fee_paise; delete r.fee_expense_id; }
   return c.json({ payments: rows });
 });
 
@@ -94,6 +99,8 @@ r.post("/:id/void", requireCap("payments"), async (c) => {
 r.get("/accounts", requireCap("balances"), async (c) => {
   const p = c.get("property");
   const asOf = c.req.query("as_of") ?? todayIn(p.timezone);
+  // The front desk sees only the cash it holds (cash in hand, petty cash); banks are for the revenue desk, owner and CA.
+  const fin = allowed(c.get("actor"), "finance");
   const rows = await all(c.env.DB,
     `SELECT a.*,
        a.opening_paise
@@ -102,9 +109,10 @@ r.get("/accounts", requireCap("balances"), async (c) => {
        - COALESCE((SELECT SUM(amount_paise) FROM expenses WHERE paid_from_account_id = a.id AND voided_at IS NULL AND on_date <= ?),0)
        + COALESCE((SELECT SUM(amount_paise) FROM transfers WHERE to_account_id = a.id AND voided_at IS NULL AND on_date <= ?),0)
        - COALESCE((SELECT SUM(amount_paise) FROM transfers WHERE from_account_id = a.id AND voided_at IS NULL AND on_date <= ?),0) AS balance_paise
-     FROM money_accounts a WHERE a.property_id = ? AND a.active = 1 ORDER BY a.kind`, asOf, asOf, asOf, asOf, asOf, p.id);
+     FROM money_accounts a WHERE a.property_id = ? AND a.active = 1 ${fin ? "" : "AND a.holder_role = 'property'"} ORDER BY a.kind`, asOf, asOf, asOf, asOf, asOf, p.id);
   const period = asOf.slice(0, 7);
-  const spent = await all(c.env.DB, "SELECT paid_from_account_id AS account_id, SUM(amount_paise) AS spent_paise FROM expenses WHERE property_id = ? AND voided_at IS NULL AND substr(on_date,1,7) = ? GROUP BY paid_from_account_id", p.id, period);
+  const spent = await all(c.env.DB, `SELECT e.paid_from_account_id AS account_id, SUM(e.amount_paise) AS spent_paise FROM expenses e JOIN money_accounts a ON a.id = e.paid_from_account_id WHERE e.property_id = ? AND e.voided_at IS NULL AND substr(e.on_date,1,7) = ? ${fin ? "" : "AND a.holder_role = 'property'"} GROUP BY e.paid_from_account_id`, p.id, period);
+  if (!fin) for (const r of rows as any[]) { delete r.account_no; delete r.reported_balance_paise; delete r.reported_at; delete r.opening_paise; }
   return c.json({ as_of: asOf, accounts: rows, spent_this_month: spent });
 });
 
@@ -131,9 +139,11 @@ r.post("/transfers", requireCap("transfers"), async (c) => {
   return c.json({ id: tid }, 201);
 });
 
-r.get("/transfers", requireCap("payments"), async (c) => {
+r.get("/transfers", requireAny("payments", "finance"), async (c) => {
   const p = c.get("property");
-  const rows = await all(c.env.DB, "SELECT t.*, fa.name AS from_name, ta.name AS to_name FROM transfers t JOIN money_accounts fa ON fa.id = t.from_account_id JOIN money_accounts ta ON ta.id = t.to_account_id WHERE t.property_id = ? AND t.voided_at IS NULL ORDER BY t.on_date DESC LIMIT 200", p.id);
+  // The front desk sees only movements of the cash it holds (deposits, petty top-ups), never bank-to-bank or gateway settlements.
+  const own = allowed(c.get("actor"), "finance") ? "" : "AND (fa.holder_role = 'property' OR ta.holder_role = 'property')";
+  const rows = await all(c.env.DB, `SELECT t.*, fa.name AS from_name, ta.name AS to_name FROM transfers t JOIN money_accounts fa ON fa.id = t.from_account_id JOIN money_accounts ta ON ta.id = t.to_account_id WHERE t.property_id = ? AND t.voided_at IS NULL ${own} ORDER BY t.on_date DESC LIMIT 200`, p.id);
   return c.json({ transfers: rows });
 });
 

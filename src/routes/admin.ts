@@ -1,7 +1,7 @@
 import { newRouter, requireCap, body, str, optStr, int, oneOf, paise, optDate } from "../app";
 import { Batch, HttpError, all, one, id } from "../db";
 import { gstinFormatValid } from "../domain/gst";
-import { CAN } from "../auth";
+import { CAN, allowed } from "../auth";
 import { todayIn } from "../domain/dates";
 import { setPassword, createPasswordLink } from "./auth";
 import { EXPENSE_CATEGORIES, EXPENSE_FAMILIES, COMMON_PETTY, COMMON_BANK } from "../domain/expenseCategories";
@@ -29,6 +29,12 @@ r.get("/ref", async (c) => {
     all(c.env.DB, "SELECT id, name, role FROM users WHERE property_id = ? AND active = 1", p.id),
     all(c.env.DB, "SELECT id, room_id, name, rate_paise, from_date, to_date, priority FROM rate_cards WHERE property_id = ? ORDER BY room_id, priority", p.id),
   ]);
+  // The front desk and sales get account names (to say where a UPI landed) but no account numbers, and no OTA commercial terms.
+  const fin = allowed(c.get("actor"), "finance");
+  if (!fin) {
+    for (const a of accounts as any[]) delete a.account_no;
+    for (const ch of channels as any[]) { delete ch.commission_bp; delete ch.payment_fee_bp; delete ch.tcs_bp; delete ch.tds_bp; }
+  }
   return c.json({ locations, channels, accounts, users, rate_cards: rateCards, expense_categories: EXPENSE_CATEGORIES, expense_families: EXPENSE_FAMILIES, common_categories: { petty: COMMON_PETTY, bank: COMMON_BANK } });
 });
 
@@ -64,6 +70,13 @@ r.get("/files/*", async (c) => {
   const p = c.get("property");
   const key = c.req.path.replace(/^\/api\/files\//, "");
   if (!key.split("/")[1] || key.split("/")[1] !== p.id) throw new HttpError(403, "not your property's file");
+  // Each kind of file goes only to the roles allowed to see what it records.
+  const actor = c.get("actor"); const kind = key.split("/")[0];
+  const may = kind === "packs" ? allowed(actor, "close")
+    : kind === "inbox" ? allowed(actor, "finance")
+    : kind === "ids" ? allowed(actor, "ids_view")
+    : allowed(actor, "petty_expenses") || allowed(actor, "bank_expenses") || allowed(actor, "pnl_reports") || allowed(actor, "tasks");
+  if (!may) throw new HttpError(403, `${actor.role} may not open this file`);
   const obj = await c.env.FILES.get(key);
   if (!obj) throw new HttpError(404, "file not found");
   return new Response(obj.body, { headers: { "content-type": obj.httpMetadata?.contentType ?? "application/octet-stream", "cache-control": "private, max-age=3600" } });

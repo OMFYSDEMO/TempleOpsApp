@@ -1,11 +1,12 @@
-import { newRouter, requireCap, body, str, optStr, oneOf, paise } from "../app";
+import { newRouter, requireCap, requireAny, body, str, optStr, oneOf, paise } from "../app";
 import { Batch, HttpError, all, one, id, assertPeriodOpen, defaultBank, bankAccount } from "../db";
 import { nowIso, todayIn } from "../domain/dates";
 import { computeSettlement } from "../domain/settlement";
 import type { ChannelRow } from "../services/bookings";
 
 const r = newRouter();
-r.use("*", requireCap("settlements"));
+// The CA reads OTA payouts for the books; computing and settling stays with the revenue desk and owner.
+r.use("*", async (c, next) => (c.req.method === "GET" ? requireAny("settlements", "finance") : requireCap("settlements"))(c, next));
 
 r.get("/", async (c) => {
   const p = c.get("property");

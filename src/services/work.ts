@@ -43,8 +43,13 @@ export async function allWorkItems(db: D1Database, p: PropertyRow, now = nowIso(
   // Sales: emails waiting and leads nobody has answered.
   for (const r of await all<any>(db, "SELECT id, kind, source, subject, received_at, auto_note, parsed_json FROM inbox_items WHERE property_id = ? AND status = 'pending' ORDER BY received_at", p.id)) {
     const d = r.parsed_json ? JSON.parse(r.parsed_json) : {};
-    out.push(item("inbox", `inbox:${r.id}`, `${d.guest_name ?? r.subject ?? "Email"} · ${r.kind.replace("_", " ")} from ${r.source}`, r.auto_note ?? null, "sales", r.received_at, "#inbox", now));
+    // Bank alerts and gateway receipts that could not post themselves are the revenue desk's, never sales'.
+    const finance = ["bank_alert", "payment"].includes(r.kind) || ["bank", "airpay"].includes(r.source);
+    out.push(item("inbox", `inbox:${r.id}`, `${d.guest_name ?? r.subject ?? "Email"} · ${r.kind.replace("_", " ")} from ${r.source}`, r.auto_note ?? null, finance ? "revenue" : "sales", r.received_at, "#inbox", now));
   }
+  // Revenue: a bank alert AVOS could not post (account digits unknown, unreadable) waits in the inbox for the revenue desk.
+  for (const r of await all<any>(db, "SELECT id, subject, received_at, auto_note FROM inbox_items WHERE property_id = ? AND kind = 'bank_alert' AND status = 'routed' ORDER BY received_at", p.id))
+    out.push(item("inbox", `inbox:${r.id}`, `Bank alert not posted · ${r.subject ?? "bank email"}`, r.auto_note ?? null, "revenue", r.received_at, "#inbox", now));
   for (const r of await all<any>(db, "SELECT l.id, l.created_at, l.check_in, l.source, g.name FROM leads l LEFT JOIN guests g ON g.id = l.guest_id WHERE l.property_id = ? AND l.status = 'new' ORDER BY l.created_at", p.id))
     out.push(item("lead", `lead:${r.id}`, `${r.name ?? "Lead"} · ${r.source} enquiry unanswered`, r.check_in ? `wants ${r.check_in}` : null, "sales", r.created_at, "#leads", now));
   // Property: today's arrivals and departures, overstays, open tasks, gateway receipts not matched to a stay.

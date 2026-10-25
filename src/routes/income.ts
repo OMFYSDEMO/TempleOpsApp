@@ -1,10 +1,12 @@
-import { newRouter, requireCap, body, str, optStr, int, oneOf, paise, optDate } from "../app";
+import { newRouter, requireCap, requireAny, body, str, optStr, int, oneOf, paise, optDate } from "../app";
 import { Batch, HttpError, all, one, id, assertPeriodOpen } from "../db";
 import { nowIso, todayIn } from "../domain/dates";
 import { splitInclusive } from "../domain/money";
+import { allowed } from "../auth";
 
 const r = newRouter();
-r.use("*", requireCap("payments"));
+// The CA and revenue desk read the register; recording stays with whoever collects the money.
+r.use("*", async (c, next) => (c.req.method === "GET" ? requireAny("payments", "finance") : requireCap("payments"))(c, next));
 
 export const INCOME_CATEGORIES = ["dining", "photo", "events", "transport", "other"] as const;
 const METHODS = ["upi", "cash", "card", "airpay", "bank"] as const;
@@ -13,8 +15,10 @@ const METHODS = ["upi", "cash", "card", "airpay", "bank"] as const;
 r.get("/", async (c) => {
   const p = c.get("property");
   const period = c.req.query("period") ?? todayIn(p.timezone).slice(0, 7);
+  // The front desk sees what it recorded and what landed in the cash it holds; the rest is the revenue desk's, owner's and CA's.
+  const own = allowed(c.get("actor"), "finance") ? "" : "AND (a.holder_role = 'property' OR u.role = 'property')";
   const rows = await all(c.env.DB, `SELECT i.*, a.name AS account_name, u.name AS recorded_name FROM other_income i LEFT JOIN money_accounts a ON a.id = i.account_id LEFT JOIN users u ON u.id = i.recorded_by
-     WHERE i.property_id = ? AND substr(i.on_date,1,7) = ? ORDER BY i.on_date DESC, i.created_at DESC`, p.id, period);
+     WHERE i.property_id = ? AND substr(i.on_date,1,7) = ? ${own} ORDER BY i.on_date DESC, i.created_at DESC`, p.id, period);
   return c.json({ period, income: rows, categories: INCOME_CATEGORIES });
 });
 

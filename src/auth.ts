@@ -141,6 +141,9 @@ export const CAN: Record<string, Role[]> = {
   admin: ["owner"],
   audit: ["owner", "accountant", "revenue"],
   balances: ["property", "revenue", "owner", "accountant"],
+  // Bank balances, account numbers, OTA terms, gateway fees, bank alerts: the revenue desk, the owner and the CA only.
+  // The front desk and sales see the money they record themselves, nothing else.
+  finance: ["revenue", "owner", "accountant"],
   ids_capture: ["property", "owner"],
   ids_view: ["sales", "property", "revenue", "owner"],
   form_c: ["sales", "revenue", "owner"],
