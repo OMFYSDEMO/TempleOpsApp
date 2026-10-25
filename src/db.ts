@@ -16,6 +16,7 @@ export interface PropertyRow {
   quote_valid_hours: number; hold_hours: number; lead_nudge_minutes: number; lead_escalate_minutes: number;
   recon_fee_tolerance_bp: number; recon_subset_tolerance_bp: number;
   inbox_automation: number;
+  pos_account_id: string | null;
 }
 
 export async function loadProperty(db: D1Database, id: string): Promise<PropertyRow> {

@@ -110,7 +110,7 @@ describe("Lead → CA", () => {
     const card = await ok("sindhu", "POST", "/api/payments", { booking_id: bookingId, method: "card", amount_paise: 2000000, reference: "POS1234" });
     expect(card.fee_expense_id).toBeTruthy();
     const fees = await sql("SELECT amount_paise, kind FROM expenses WHERE payment_id = ?", card.id);
-    expect(fees).toEqual([{ amount_paise: 40000, kind: "gateway_fee" }]); // 2% once
+    expect(fees).toEqual([{ amount_paise: 35400, kind: "gateway_fee" }]); // the POS charge, 1.77%, once
     const inv = await ok("sindhu", "POST", `/api/invoices/bookings/${bookingId}`);
     invoiceId = inv.id;
     expect(inv.number).toBe("MV/26-27/001");

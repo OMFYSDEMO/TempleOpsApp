@@ -197,12 +197,17 @@ export function Admin({ refs }: { me: Me; refs: Ref }) {
 /** Banks and cash accounts: names, opening balances, which bank is the default, and closing a bank once it is empty. */
 function AccountsSettings() {
   const q = useLoad(() => get("/admin/accounts"), []);
+  const prop = useLoad(() => get("/admin/property"), []);
   const bal = useLoad(() => get("/payments/accounts"), []);
   const [edit, setEdit] = useState<any>(null);
   const [na, setNa] = useState<any>({ name: "", account_no: "", opening: "", opening_date: todayIso(), is_default: false });
   const balanceOf = (id: string) => bal.data?.accounts.find((a: any) => a.id === id)?.balance_paise;
   const save = (a: any) => run(async () => { await patch(`/admin/accounts/${a.id}`, { name: a.name, account_no: a.account_no || null, opening_paise: Math.round(Number(a.opening) * 100), opening_date: a.opening_date || null, note: a.note || null }); setEdit(null); await Promise.all([q.reload(), bal.reload()]); }, "Account saved · reload to see it in the pickers");
+  const banks = (q.data?.accounts ?? []).filter((a: any) => a.kind === "bank" && a.active);
+  const setPos = (v: string) => run(async () => { await patch("/admin/property", { pos_account_id: v || null }); await prop.reload(); }, "Card machine bank saved");
   return <Card title="Bank & cash accounts" sub="each bank is its own ledger with its own statement; the default bank is where payouts, gateway settlements and bank receipts land unless someone picks another">
+    {prop.data && banks.length > 0 && <Field label="Card machine (POS) settles into" hint="card payments at the front desk land in this bank, net of its charge; change it when the new machine arrives">
+      <select value={prop.data.property.pos_account_id ?? ""} onChange={(e: any) => setPos(e.currentTarget.value)}><option value="">the default bank</option>{banks.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>}
     {!q.data ? <Loading error={q.error} /> : q.data.accounts.map((a: any) => <div className="row" key={a.id}><div>
       <div><b>{a.name}</b> <span className="muted">· {a.kind.replace("_", " ")}{a.account_no ? ` · ${a.account_no}` : ""}</span> {a.is_default ? <Status s="default" /> : null}{!a.active && <Status s="inactive" />}</div>
       <div className="sub">opening {inr(a.opening_paise)} on {a.opening_date ?? "—"}{balanceOf(a.id) !== undefined ? ` · balance today ${inr(balanceOf(a.id))}` : ""}{a.reported_balance_paise != null ? ` · bank reported ${inr(a.reported_balance_paise)} at ${fmtDateTime(a.reported_at)}` : ""}{a.note ? ` · ${a.note}` : ""}</div>

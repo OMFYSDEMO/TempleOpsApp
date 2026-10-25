@@ -151,6 +151,11 @@ admin.patch("/property", async (c) => {
   for (const k of ["gst_nil_upto_paise", "gst_threshold_paise", "gst_rate_below_bp", "gst_rate_above_bp", "auto_approve_max_rooms", "quote_valid_hours", "hold_hours", "lead_nudge_minutes", "lead_escalate_minutes", "recon_fee_tolerance_bp", "recon_subset_tolerance_bp"]) if (x[k] !== undefined) after[k] = int(x[k], k, { min: 0 });
   if (x.auto_approve_on_tariff !== undefined) after.auto_approve_on_tariff = x.auto_approve_on_tariff ? 1 : 0;
   if (x.inbox_automation !== undefined) after.inbox_automation = x.inbox_automation ? 1 : 0;
+  if (x.pos_account_id !== undefined) {
+    const pos = optStr(x.pos_account_id, "pos_account_id");
+    if (pos && !(await one(c.env.DB, "SELECT id FROM money_accounts WHERE id = ? AND property_id = ? AND kind = 'bank' AND active = 1", pos, p.id))) throw new HttpError(400, "the card machine must settle into an open bank account");
+    after.pos_account_id = pos;
+  }
   if (!Object.keys(after).length) throw new HttpError(400, "nothing to update");
   const b = new Batch(c.env.DB, c.get("actor"));
   b.add(`UPDATE properties SET ${Object.keys(after).map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, ...Object.values(after), p.id);

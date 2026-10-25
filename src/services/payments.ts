@@ -7,7 +7,8 @@ import { loadBooking, paidOnBooking } from "./bookings";
 export const METHODS = ["upi", "cash", "card", "airpay", "bank", "ota"] as const;
 export type PaymentMethod = (typeof METHODS)[number];
 /** Contracted gateway fee per method, in basis points of the amount received. */
-export const GATEWAY_FEE_BP: Record<string, number> = { airpay: 200, card: 200, upi: 0, cash: 0, bank: 0, ota: 0 };
+// Card: the bank's POS charge as it has actually been deducted here, 1.5% + 18% GST = 1.77%. Reconciliation adjusts it to the exact figure.
+export const GATEWAY_FEE_BP: Record<string, number> = { airpay: 200, card: 177, upi: 0, cash: 0, bank: 0, ota: 0 };
 
 export interface RecordPaymentInput {
   idempotency_key?: string | null;
@@ -43,13 +44,18 @@ export async function recordPayment(db: D1Database, actor: Actor, p: PropertyRow
     guestId = bk.guest_id;
     kind = bk.status === "checked_in" || bk.status === "checked_out" ? "balance" : "advance";
   }
-  // Default account by method: cash → cash in hand; airpay/card → the gateway clearing account; else bank.
+  // Default account by method: cash → cash in hand; airpay → the gateway clearing account; card → the bank the
+  // property's card machine settles into (Settings), else the default bank; upi/bank → the default bank.
   let accountId = x.account_id ?? null;
+  if (!accountId && x.method === "card" && p.pos_account_id) {
+    const pos = await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE id = ? AND property_id = ? AND kind = 'bank' AND active = 1", p.pos_account_id, p.id);
+    if (pos) accountId = pos.id;
+  }
   if (accountId) {
     const a = await one(db, "SELECT id FROM money_accounts WHERE id = ? AND property_id = ? AND active = 1", accountId, p.id);
     if (!a) throw new HttpError(400, "unknown money account");
   } else {
-    const kindWanted = x.method === "cash" ? "cash" : x.method === "airpay" || x.method === "card" ? "gateway" : "bank";
+    const kindWanted = x.method === "cash" ? "cash" : x.method === "airpay" ? "gateway" : "bank";
     const a = await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = ? AND active = 1 ORDER BY is_default DESC, id LIMIT 1", p.id, kindWanted)
       ?? await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = 'bank' AND active = 1 ORDER BY is_default DESC, id LIMIT 1", p.id);
     if (!a) throw new HttpError(400, "no money account configured");
