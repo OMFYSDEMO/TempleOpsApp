@@ -57,6 +57,15 @@ describe("Bank transaction alerts", () => {
     expect((await ok("shaji", "GET", "/api/recon?period=2026-10")).lines.find((l: any) => l.reference === "N296260012").match.via).toBe("bank alert");
   });
 
+  it("an older alert forwarded later does not replace the newer balance the bank reported", async () => {
+    const send = (amount: string, when: string, balance: string, ref: string) => ok("shaji", "POST", "/api/inbox/ingest", { from: "transaction.alerts@idfcfirstbank.com", subject: "Transaction alert from IDFC FIRST Bank", html: alert(amount, "SOMEONE", ref, balance, when), message_id: `<${ref}@idfc>` });
+    await send("100.00", "26-10-2026 10:00:00", "900,000.00", "N0000000NEW1");
+    await send("50.00", "25-10-2026 09:00:00", "800,000.00", "N0000000OLD1");
+    const [acct] = await sql("SELECT reported_balance_paise, reported_at FROM money_accounts WHERE account_no IS NOT NULL AND reported_balance_paise IS NOT NULL ORDER BY reported_at DESC LIMIT 1");
+    expect(acct.reported_balance_paise).toBe(90000000);
+    expect(acct.reported_at).toBe("2026-10-26T10:00:00+05:30");
+  });
+
   it("an alert for an account AVOS cannot place waits with the reason", async () => {
     await ok("shaji", "POST", "/api/admin/accounts", { name: "Yes Bank", account_no: "4411" });
     const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "transaction.alerts@idfcfirstbank.com", subject: "Transaction alert from IDFC FIRST Bank", html: alert("100.00", "SOMEONE", "REF77777777", "1.00").replace("XXXXXXX3390", "XXXXXXX9999") });

@@ -149,7 +149,13 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
       const dupLine = await one<{ id: string }>(db, "SELECT id FROM bank_statement_lines WHERE property_id = ? AND account_id = ? AND line_hash = ?", property.id, acct.id, lineHash);
       const now = nowIso();
       const b = new Batch(db, actor);
-      if (d.balance_paise != null) b.add("UPDATE money_accounts SET reported_balance_paise = ?, reported_at = ? WHERE id = ?", Number(d.balance_paise), `${d.on_date}T${d.at_time ?? "00:00:00"}+05:30`, acct.id);
+      // Keep the bank's latest word: an older alert forwarded by hand later must not replace a newer balance.
+      // reported_at is an IST timestamp; comparing the instants (not the strings) copes with "13:36" vs "14:32:14".
+      if (d.balance_paise != null) {
+        const at = `${d.on_date}T${d.at_time ?? "00:00:00"}+05:30`;
+        const cur = await one<{ reported_at: string | null }>(db, "SELECT reported_at FROM money_accounts WHERE id = ?", acct.id);
+        if (!cur?.reported_at || !(Date.parse(cur.reported_at) > Date.parse(at))) b.add("UPDATE money_accounts SET reported_balance_paise = ?, reported_at = ? WHERE id = ?", Number(d.balance_paise), at, acct.id);
+      }
       if (dupLine) {
         b.add("UPDATE inbox_items SET status = 'duplicate', auto_note = 'already on the statement' WHERE id = ?", item.id);
         await b.run();
