@@ -157,11 +157,18 @@ export function parseBookingEngine(subject: string, body: string, year: number):
  */
 export function parseBankAlert(subject: string, body: string): ParsedEmail {
   const flat = body.replace(/\s+/g, " ");
-  const m = flat.match(/A\/C\s*(?:No\.?\s*)?[Xx*]*(\d{3,6})\s+has been\s+(credited|debited)\s+with\s+(?:INR|Rs\.?|₹)\s*([\d,]+\.?\d*)\s+on\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?/i);
-  const method = flat.match(/vide\s+([A-Za-z\/]+)\s+(?:payment\s+)?reference/i)?.[1] ?? flat.match(/\b(NEFT|IMPS|RTGS|UPI|ACH|NACH|ECS|CMS)\b/i)?.[1] ?? null;
-  const reference = flat.match(/reference\s*(?:no\.?|number|#)?\s*:?\s*([A-Za-z0-9\-\/]{6,})/i)?.[1] ?? null;
-  const counterparty = flat.match(/received from\s+(.+?)\s*\.(?:\s|$)/i)?.[1]?.trim() ?? flat.match(/\b(?:towards|to|at|paid to)\s+(.+?)\s*\.(?:\s|$)/i)?.[1]?.trim() ?? null;
-  const balance = flat.match(/(?:New|Available|Closing)\s+balance\s+is\s+(?:INR|Rs\.?|₹)\s*([\d,]+\.?\d*)/i)?.[1] ?? null;
+  // Read only the alert itself, from "Your A/C …" to the sign-off. The bank's disclaimer underneath
+  // ("…links of look-alike websites to mislead into entering sensitive information") must never be read
+  // as a payee, and a plain credit alert carries no payer, method or reference at all.
+  const start = flat.search(/A\/C\s*(?:No\.?\s*)?[Xx*]*\d{3,6}\s+has been/i);
+  const tail = start >= 0 ? flat.slice(start) : flat;
+  const stop = tail.search(/Always You First|This is an auto[- ]?generated|\bDisclaimer\b|Team IDFC/i);
+  const alertText = stop >= 0 ? tail.slice(0, stop) : tail;
+  const m = alertText.match(/A\/C\s*(?:No\.?\s*)?[Xx*]*(\d{3,6})\s+has been\s+(credited|debited)\s+with\s+(?:INR|Rs\.?|₹)\s*([\d,]+\.?\d*)\s+on\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?/i);
+  const method = alertText.match(/vide\s+([A-Za-z\/]+)\s+(?:payment\s+)?reference/i)?.[1] ?? alertText.match(/\b(NEFT|IMPS|RTGS|UPI|ACH|NACH|ECS|CMS)\b/i)?.[1] ?? null;
+  const reference = alertText.match(/reference\s*(?:no\.?|number|#)?\s*:?\s*([A-Za-z0-9\-\/]{6,})/i)?.[1] ?? null;
+  const counterparty = alertText.match(/received from\s+(.+?)\s*\.(?:\s|$)/i)?.[1]?.trim() ?? alertText.match(/\b(?:towards|paid to|to|at)\s+(.+?)\s*\.(?:\s|$)/i)?.[1]?.trim() ?? null;
+  const balance = alertText.match(/(?:New|Available|Closing)\s+balance\s+is\s+(?:INR|Rs\.?|₹)\s*([\d,]+\.?\d*)/i)?.[1] ?? null;
   const bank = /idfc/i.test(subject + " " + flat) ? "IDFC FIRST" : flat.match(/Greetings from\s+([A-Z][A-Za-z ]+Bank)/)?.[1] ?? null;
   const onDate = m ? parseLooseDate(m[4], new Date().getUTCFullYear()) : null;
   const data = {

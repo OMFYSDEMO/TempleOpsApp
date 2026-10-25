@@ -142,7 +142,9 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
       const acct = banks.find((b) => b.account_no && last && (last.endsWith(String(b.account_no)) || String(b.account_no).endsWith(last))) ?? (banks.length === 1 ? banks[0] : null);
       if (!acct) return { applied: false, note: `which bank is A/C ...${last || "?"}? Put the account's last digits on it under Settings & users → Bank & cash accounts` };
       const signed = d.direction === "debited" ? -Number(d.amount_paise) : Number(d.amount_paise);
-      const description = [d.method, d.counterparty, d.reference].filter(Boolean).join(" ");
+      // A plain credit alert has no method, payer or reference; the direction and time keep the line readable
+      // and keep two same-amount credits on one day from being taken for the same line.
+      const description = [d.method, d.counterparty, d.reference].filter(Boolean).join(" ") || `${d.direction === "debited" ? "Debit" : "Credit"} alert ${d.at_time ?? ""}`.trim();
       const lineHash = hashLine(String(d.on_date), description, signed);
       const dupLine = await one<{ id: string }>(db, "SELECT id FROM bank_statement_lines WHERE property_id = ? AND account_id = ? AND line_hash = ?", property.id, acct.id, lineHash);
       const now = nowIso();

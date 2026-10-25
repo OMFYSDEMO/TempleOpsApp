@@ -17,6 +17,14 @@ describe("Bank transaction alerts", () => {
     expect(f.kind).toBe("bank_alert"); expect(f.data).toMatchObject({ direction: "debited", amount_paise: 476500, counterparty: "KSEB LTD", reference: "N296260012" });
   });
 
+  it("a plain credit alert (no payer, no reference) is read from the alert only, never from the disclaimer", () => {
+    // IDFC's short credit alert, as forwarded from Zoho, followed by the bank's standard disclaimer.
+    const body = "Kind Regards,\nThe Meadows | Varkala\n============ Forwarded message ============\nFrom: IDFC FIRST Bank <transaction.alerts@idfcfirstbank.com>\nSubject: Transaction alert from IDFC FIRST Bank\n============ Forwarded message ============\nDear MIDHURST HOSPITALITY PRIVATE LIMITED,\nGreetings from IDFC FIRST Bank.\nYour A/C XXXXXXX3390 has been credited with INR 9,500.00 on 24/10/2026 13:36. New balance is INR 5,32,532.73CR.\nAlways You First,\nTeam IDFC FIRST Bank\nThis is an auto generated e-mail. Please do not reply.\nDisclaimer\nBeware of the fraudulent emails that contain links of look-alike websites to mislead into entering sensitive information. Kindly visit IDFC FIRST Bank's website.";
+    const r = parseInboundEmail("bookings@meadowsvarkala.com", "Fwd: Transaction alert from IDFC FIRST Bank", undefined, body);
+    expect(r.kind).toBe("bank_alert"); expect(r.confidence).toBe("high");
+    expect(r.data).toMatchObject({ account_last: "3390", direction: "credited", amount_paise: 950000, on_date: "2026-10-24", at_time: "13:36", method: null, reference: null, counterparty: null, balance_paise: 53253273 });
+  });
+
   it("an Airpay credit moves the money from Airpay clearing into the bank and is matched on the statement; the bank's balance is kept", async () => {
     await ok("shaji", "PATCH", "/api/admin/accounts/acc_bank", { name: "IDFC First", account_no: "3390" });
     const before = (await ok("shaji", "GET", "/api/payments/accounts")).accounts;
