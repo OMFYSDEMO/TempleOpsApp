@@ -103,8 +103,25 @@ export async function priceStay(db: D1Database, property: PropertyRow, roomsIn: 
  * Computes GST per room-night from the tariff card, checks the rate against tariff, decides approval
  * by exception, occupies inventory and audits — all in one D1 batch.
  */
+/**
+ * A booking-engine or OTA reference belongs to one live stay: Airpay receipts, cancellations and payouts find
+ * the booking by it. Cancelled and no-show stays do not hold their reference. STAAH refs are stored as
+ * "OTA ref (STAAH ref)", so either half typed by hand is recognised.
+ */
+export async function assertRefFree(db: D1Database, propertyId: string, ref: string | null | undefined, exceptBookingId?: string) {
+  const r = (ref ?? "").trim();
+  if (!r) return;
+  const other = await one<{ id: string; name: string; check_in: string; check_out: string }>(db,
+    `SELECT b.id, g.name, b.check_in, b.check_out FROM bookings b JOIN guests g ON g.id = b.guest_id
+     WHERE b.property_id = ? AND b.status NOT IN ('cancelled','no_show') AND b.id != ? AND (b.external_ref = ? OR b.external_ref LIKE ? OR b.external_ref LIKE ?) LIMIT 1`,
+    propertyId, exceptBookingId ?? "", r, `${r} (%`, `% (${r})`);
+  if (other) throw new HttpError(409, `reference ${r} is already on ${other.name}'s booking (${other.check_in} → ${other.check_out})`);
+}
+
 export async function createBooking(db: D1Database, actor: Actor | null, property: PropertyRow, input: CreateBookingInput) {
   const nights = nightsBetween(input.checkIn, input.checkOut);
+  if (input.externalRef !== undefined) input.externalRef = input.externalRef?.trim() || null;
+  await assertRefFree(db, property.id, input.externalRef);
   if (!input.rooms.length) throw new HttpError(400, "at least one room is required");
   await assertPeriodOpen(db, property.id, input.checkOut);
 
@@ -233,6 +250,7 @@ export async function amendBooking(db: D1Database, actor: Actor, property: Prope
   await assertPeriodOpen(db, property.id, bk.books_date);
   const checkIn = input.checkIn ?? bk.check_in, checkOut = input.checkOut ?? bk.check_out;
   if (!(checkIn < checkOut)) throw new HttpError(400, "check-out must be after check-in");
+  if (input.externalRef !== undefined) { input.externalRef = input.externalRef?.trim() || null; await assertRefFree(db, property.id, input.externalRef, bk.id); }
   await assertPeriodOpen(db, property.id, checkOut);
   const currentRooms = await all<{ room_id: string; nightly_rate_paise: number }>(db, "SELECT room_id, nightly_rate_paise FROM booking_rooms WHERE booking_id = ? GROUP BY room_id", bk.id);
   const roomsIn = input.rooms ?? currentRooms.map((r) => ({ roomId: r.room_id, nightlyRatePaise: r.nightly_rate_paise }));

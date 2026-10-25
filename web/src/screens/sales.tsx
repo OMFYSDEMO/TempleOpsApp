@@ -213,6 +213,9 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
         </div>
         <div className="sub" style={{ marginBottom: "6px" }}>Channel</div>
         <Chips value={f.channel_code} options={refs.channels.map((c) => ({ value: c.code, label: CHANNEL_SHORT[c.code] ?? c.name }))} onChange={(v) => setF({ ...f, channel_code: v })} />
+        <div style={{ marginTop: "10px", maxWidth: "480px" }}>
+          <Field label="Booking-engine / OTA reference" hint="the reservation number on the email, if there is one · Airpay receipts and cancellations find the booking by it"><input value={f.external_ref ?? ""} onChange={(e: any) => setF({ ...f, external_ref: e.currentTarget.value })} placeholder="e.g. 1060900000106018" /></Field>
+        </div>
       </div>
       <div className="section"><div className="sectionhead"><b>2 · Rooms</b><span className="sub">{totals.nights > 0 ? "tap a free room to add it at tariff; change the rate on the tile" : "set the dates first"}</span></div>
         <RoomPicker me={me} rooms={rooms} checkIn={f.check_in} checkOut={f.check_out} sel={f.rooms} onChange={(rs) => setF({ ...f, rooms: rs })} tariffFor={tariffFor} holders={av.holders} loading={av.loading} />
@@ -303,11 +306,11 @@ function BookingDetail({ me, refs, d, rooms, tariffFor, onChange, onClose }: { m
 function Amend({ me, d, rooms, refs, tariffFor, onDone }: { me: Me; d: any; rooms: Ref["locations"]; refs: Ref; tariffFor: (roomId: string, night: string) => number | null; onDone: () => Promise<void> }) {
   const cur: Record<string, string> = {}; for (const r of d.rooms) cur[r.room_id] = String(r.nightly_rate_paise / 100);
   const [openA, setOpenA] = useState(false);
-  const [a, setA] = useState<any>({ guest_name: d.guest.name, guest_phone: d.guest.phone ?? "", check_in: d.booking.check_in, check_out: d.booking.check_out, adults: d.booking.adults, children: d.booking.children, channel_code: d.channel.code, rooms: cur, remark: "" });
+  const [a, setA] = useState<any>({ guest_name: d.guest.name, guest_phone: d.guest.phone ?? "", check_in: d.booking.check_in, check_out: d.booking.check_out, adults: d.booking.adults, children: d.booking.children, channel_code: d.channel.code, external_ref: d.booking.external_ref ?? "", rooms: cur, remark: "" });
   const av = useHolders(a.check_in, a.check_out, d.booking.id);
   const totals = stayTotals(me, a.rooms, a.check_in, a.check_out, tariffFor);
   const channel = refs.channels.find((c) => c.code === a.channel_code);
-  const changed = a.guest_name !== d.guest.name || a.guest_phone !== (d.guest.phone ?? "") || a.check_in !== d.booking.check_in || a.check_out !== d.booking.check_out || a.adults !== d.booking.adults || a.children !== d.booking.children || a.channel_code !== d.channel.code || JSON.stringify(a.rooms) !== JSON.stringify(cur);
+  const changed = a.guest_name !== d.guest.name || a.guest_phone !== (d.guest.phone ?? "") || a.check_in !== d.booking.check_in || a.check_out !== d.booking.check_out || a.adults !== d.booking.adults || a.children !== d.booking.children || a.channel_code !== d.channel.code || a.external_ref.trim() !== (d.booking.external_ref ?? "") || JSON.stringify(a.rooms) !== JSON.stringify(cur);
   const save = () => run(async () => {
     const r = await post(`/bookings/${d.booking.id}/amend`, { ...a, rooms: Object.entries(a.rooms as Record<string, string>).filter(([, v]) => v !== "").map(([room_id, v]) => ({ room_id, nightly_rate_paise: Math.round(Number(v) * 100) })) });
     toast(r.booking.needsApproval ? `Amended · awaiting approval (${r.booking.approval.reasons.join(", ")})` : "Amended · audited · front desk notified");
@@ -328,6 +331,7 @@ function Amend({ me, d, rooms, refs, tariffFor, onDone }: { me: Me; d: any; room
       <Field label="Guest"><input value={a.guest_name} onChange={(e: any) => setA({ ...a, guest_name: e.currentTarget.value })} /></Field>
       <Field label="Phone"><input inputMode="tel" value={a.guest_phone} onChange={(e: any) => setA({ ...a, guest_phone: e.currentTarget.value })} /></Field>
       <Field label="Channel"><select value={a.channel_code} onChange={(e: any) => setA({ ...a, channel_code: e.currentTarget.value })}>{refs.channels.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}</select></Field>
+      <Field label="Booking-engine / OTA reference" hint="the reservation number on the email"><input value={a.external_ref} onChange={(e: any) => setA({ ...a, external_ref: e.currentTarget.value })} placeholder="e.g. 1060900000106018" /></Field>
       <Field label="Remark (required)" hint="what was wrong and what changed"><input value={a.remark} onChange={(e: any) => setA({ ...a, remark: e.currentTarget.value })} placeholder="e.g. Cleartrip mapped the room type wrongly; moved to Superior" /></Field>
     </div>
     <div className="actions end"><Btn onClick={() => setOpenA(false)}>Discard</Btn><Btn kind="primary" disabled={!changed || a.remark.trim().length < 3 || totals.rooms === 0} onClick={save}>Save amendment</Btn></div>
