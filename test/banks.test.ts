@@ -50,11 +50,14 @@ describe("Bank accounts", () => {
     expect(after.find((a: any) => a.id === "acc_bank").balance_paise).toBe(yesBefore - 250000);
     expect(after.find((a: any) => a.id === idfc).balance_paise).toBe(idfcBefore + 250000);
     // Each side reconciles against its own statement: the debit on Yes Bank, the credit on IDFC.
-    const yes = await ok("shaji", "POST", "/api/recon/paste", { account_id: "acc_bank", text: "21/10/2026\tIMPS TO IDFC IMPS-7788\t2500.00\t" });
+    // The statement lines carry the transfer's own date, so the test does not depend on the day it runs.
+    const onDate: string = (await sql("SELECT on_date FROM transfers WHERE reference = 'IMPS-7788'"))[0].on_date;
+    const stmtDate = onDate.split("-").reverse().join("/");
+    const yes = await ok("shaji", "POST", "/api/recon/paste", { account_id: "acc_bank", text: `${stmtDate}\tIMPS TO IDFC IMPS-7788\t2500.00\t` });
     expect(yes.inserted).toBe(1);
     const yesLine = (await sql("SELECT status, match_kind FROM bank_statement_lines WHERE account_id = 'acc_bank' AND reference LIKE '%7788%' OR description LIKE '%IMPS-7788%' ORDER BY id DESC LIMIT 1"))[0];
     expect(yesLine.match_kind).toBe("transfer");
-    const idf = await ok("shaji", "POST", "/api/recon/paste", { account_id: idfc, text: "21/10/2026\tIMPS FROM YES BANK IMPS-7788\t\t2500.00" });
+    const idf = await ok("shaji", "POST", "/api/recon/paste", { account_id: idfc, text: `${stmtDate}\tIMPS FROM YES BANK IMPS-7788\t\t2500.00` });
     expect(idf.inserted).toBe(1);
     const idfLine = (await sql("SELECT status, match_kind FROM bank_statement_lines WHERE account_id = ? ORDER BY id DESC LIMIT 1", idfc))[0];
     expect(idfLine.match_kind).toBe("transfer");

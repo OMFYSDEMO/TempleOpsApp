@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ThemePanel, applyTheme, loadTheme } from "./theme";
 import { get, post, devUser, setDevUser } from "./api";
 import { Toaster, Empty, fmtDateTime, fmtDate, toast, Btn } from "./ui";
 import { readQueue, onQueueChange, flush } from "./offline";
@@ -49,6 +50,8 @@ export function App() {
   const [me, setMe] = useState<Me | null>(null); const [ref, setRef] = useState<Ref | null>(null); const [signedOut, setSignedOut] = useState(false); const [err, setErr] = useState<string | null>(null);
   const [appEnv, setAppEnv] = useState<string>("");
   const [notifOpen, setNotifOpen] = useState(false); const [notifs, setNotifs] = useState<any[]>([]);
+  const [themeOpen, setThemeOpen] = useState(false);
+  useEffect(() => { applyTheme(loadTheme()); }, []);
   const [openGroups, setOpenGroups] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("avos.navGroups") || "[]"); } catch { return []; } });
   const toggleGroup = (g: string) => setOpenGroups((gs) => { const next = gs.includes(g) ? gs.filter((x) => x !== g) : [...gs, g]; try { localStorage.setItem("avos.navGroups", JSON.stringify(next)); } catch {} return next; });
   const [queued, setQueued] = useState(readQueue().length);
@@ -85,9 +88,11 @@ export function App() {
       <div className="where"><Icon name="house" size={16} /><b>{me.property.name}</b><span>· {fmtDate(me.property.today)}</span></div>
       <div className="spacer" />
       {queued > 0 && <span className="queue">{queued} pending sync</span>}
+      <button className="iconbtn" onClick={() => setThemeOpen(true)} title="Theme settings" aria-label="Theme settings"><Icon name="palette" /></button>
       <button className="iconbtn" onClick={openNotifs} title="Notifications"><Icon name="bell" />{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
       <details className="usermenu"><summary><span className="avatar">{initials}</span><span>{me.actor.name}</span><span className="role">· {me.actor.role}</span><Icon name="chevron" size={14} /></summary><div>
-        <div className="sub">{me.actor.email}</div>
+        <div className="sub"><b>{me.actor.name}</b> · {me.actor.role}<br />{me.actor.email}</div>
+        <button onClick={(e: any) => { e.currentTarget.closest("details")?.removeAttribute("open"); setThemeOpen(true); }}><Icon name="palette" size={16} />Theme settings</button>
         {me.actor.via !== "access" && <button onClick={() => setChangePw(true)}><Icon name="lock" size={16} />Change password</button>}
         <button onClick={signOut}><Icon name="logout" size={16} />Sign out</button>
         {devUser() && appEnv !== "production" && <div className="sub"><label>Dev user <select value={devUser() ?? ""} onChange={(e: any) => { setDevUser(e.currentTarget.value); location.hash = ""; load(); }}>{DEV_USERS.map((u) => <option value={u}>{u.split("@")[0]}</option>)}</select></label></div>}
@@ -109,6 +114,7 @@ export function App() {
     </div>
     {me.capabilities.includes("tasks") && !["pay", "pexp", "ids"].includes(current.key) && <QuickCapture me={me} refs={ref} />}
     {notifOpen && <div className="sheet" onClick={() => setNotifOpen(false)}><div onClick={(e) => e.stopPropagation()}><h3>Notifications</h3>{notifs.length === 0 ? <Empty>No notifications.</Empty> : notifs.map((n) => <div className="row" key={n.id}><div><div>{n.message}</div><div className="sub">{fmtDateTime(n.created_at)}</div></div></div>)}</div></div>}
+    {themeOpen && <ThemePanel onClose={() => setThemeOpen(false)} />}
     <Toaster />
   </>;
 }
