@@ -152,12 +152,15 @@ r.get("/frontdesk/today", requireCap("frontdesk"), async (c) => {
       (SELECT COALESCE(SUM(CASE WHEN kind='refund' THEN -amount_paise ELSE amount_paise END),0) FROM payments WHERE booking_id = b.id AND status != 'void') AS paid_paise,
       (SELECT COUNT(*) FROM guest_documents d WHERE d.booking_id = b.id AND d.deleted_at IS NULL) AS doc_count, b.guest_nationality, b.form_c_status
      FROM bookings b JOIN guests g ON g.id = b.guest_id JOIN channels ch ON ch.id = b.channel_id WHERE b.property_id = ? AND ${where} ORDER BY b.check_in`;
-  const [arrivals, departures, inHouse] = await Promise.all([
+  const [arrivals, late, departures, inHouse] = await Promise.all([
     all(c.env.DB, sql("b.check_in = ? AND b.status IN ('approved','provisional')"), p.id, today),
+    // Stays that have already started (or end today) but were never checked in: a guest who came late,
+    // or a check-in the desk forgot. Without this list they appear on My work but nowhere on the desk.
+    all(c.env.DB, sql("b.check_in < ? AND b.check_out >= ? AND b.status IN ('approved','provisional')"), p.id, today, today),
     all(c.env.DB, sql("b.check_out = ? AND b.status = 'checked_in'"), p.id, today),
     all(c.env.DB, sql("b.status = 'checked_in' AND b.check_out > ?"), p.id, today),
   ]);
-  return c.json({ date: today, arrivals, departures, in_house: inHouse });
+  return c.json({ date: today, arrivals, late_arrivals: late, departures, in_house: inHouse });
 });
 
 r.post("/:id/check-in", requireCap("frontdesk"), async (c) => {
@@ -165,12 +168,26 @@ r.post("/:id/check-in", requireCap("frontdesk"), async (c) => {
   const bk = await loadBooking(c.env.DB, p.id, c.req.param("id"));
   if (bk.status === "provisional") throw new HttpError(409, "booking is awaiting approval");
   if (bk.status !== "approved") throw new HttpError(409, `booking is ${bk.status}`);
-  const b = new Batch(c.env.DB, actor);
+  // Optional arrived_at: when the desk records a check-in after the fact (guest came late at night,
+  // or the desk forgot), the real arrival time is kept instead of "now". It must fall between the
+  // booked check-in date and now.
+  const x = await body(c).catch(() => ({} as Record<string, unknown>));
   const now = nowIso();
-  b.add("UPDATE bookings SET status = 'checked_in', checked_in_at = ?, updated_at = ? WHERE id = ?", now, now, bk.id);
-  b.audit("booking.check_in", "booking", bk.id, { status: bk.status }, { status: "checked_in", at: now });
+  let at = now;
+  const given = optStr(x.arrived_at, "arrived_at");
+  if (given) {
+    const t = Date.parse(given);
+    if (Number.isNaN(t)) throw new HttpError(400, "arrived_at is not a date and time");
+    if (t > Date.now() + 5 * 60_000) throw new HttpError(400, "arrival time is in the future");
+    const localDay = todayIn(p.timezone, new Date(t));
+    if (localDay < bk.check_in) throw new HttpError(400, `arrival is before the booked check-in (${bk.check_in})`);
+    at = new Date(t).toISOString();
+  }
+  const b = new Batch(c.env.DB, actor);
+  b.add("UPDATE bookings SET status = 'checked_in', checked_in_at = ?, updated_at = ? WHERE id = ?", at, now, bk.id);
+  b.audit("booking.check_in", "booking", bk.id, { status: bk.status }, { status: "checked_in", at, ...(given ? { recorded_at: now } : {}) });
   await b.run();
-  return c.json({ ok: true, checked_in_at: now });
+  return c.json({ ok: true, checked_in_at: at });
 });
 
 /**
