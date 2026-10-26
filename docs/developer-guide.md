@@ -39,6 +39,13 @@ Locally there is no login wall: send the header `x-dev-user: <email of a seeded 
 - `src/auth.ts` lists the capabilities per role. A screen in `web/src/app.tsx` is shown when the user has its `cap`.
 - `web/src/api.ts` is the fetch wrapper (`get`, `post`, `patch`, `del`); `web/src/offline.ts` queues writes when offline.
 - `web/src/styles.css` is the whole look. Colours are tokens on `:root`; the soft tints, hover, glow and gradients are mixed from `--accent` and `--accent-deep` with `color-mix`, and every font size is in rem against a 15px root. `web/src/theme.tsx` is the Theme settings drawer (palette button, top right): mode, accent, sidebar and header colour, text size, spacing. Each choice is a `data-*` attribute on `<html>` saved in `localStorage` under `avos.theme`; the inline script in `web/index.html` re-applies it before first paint. A new colour in a rule should be a token, so dark mode and the accents keep working.
+- Accessibility target is WCAG 2.2 AA, checked with axe-core on every screen, for each role, at desktop and phone width. The rules that keep it there:
+  - Anything filled with white text uses `--fill` (the deep accent), never `--accent`; `--muted` and `--bad` are dark enough for 4.5:1 text. A new accent needs a `--accent-deep` that passes 4.5:1 against white.
+  - Each screen has one `<h1>` (the page title); `Card` titles are `<h2>`.
+  - Ask the user through `ask`, `askConfirm`, `askText` and `tell` in `web/src/ui.tsx`, never the browser's `prompt`/`confirm`/`alert`. Those dialogs are labelled, trap the keyboard, close on Esc and return focus. Destructive actions pass `danger: true`.
+  - Wrap anything that can be wider than a phone (tables, grids) in `ScrollX`, which becomes a named, keyboard-scrollable region when it overflows.
+  - Every input and select has a visible label (`Field`) or an `aria-label`; icon-only buttons need an `aria-label`.
+  - Subtitles are written for the person using the screen: no internal workflow codes or staff names.
 - `web/src/ui.tsx` holds the small component kit (Card, Row, Btn, Chips, Field, Status, Keypad, `useLoad`, `run`, `toast`) and formatting (`inr`, `fmtDate`).
 - `web/src/screens/` one file per area: `sales.tsx` (leads, inbox, reservations, availability), `property.tsx` (front desk, payments, invoices, tasks, expenses), `management.tsx` (approvals, payouts, reconcile, reports, dashboard, admin, close, GST, audit), `ids.tsx` (guest IDs, Form C, Drive settings), `auth.tsx`.
 - Money accounts: `defaultBank()` / `bankAccount()` in `src/db.ts`; owner CRUD under `/api/admin/accounts`; `BankPick` in `web/src/ui.tsx` renders only when there is more than one bank.

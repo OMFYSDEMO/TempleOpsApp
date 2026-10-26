@@ -70,7 +70,7 @@ export function App() {
 
   const resetToken = hash.startsWith("reset?") ? new URLSearchParams(hash.slice(6)).get("token") : null;
   if (resetToken) return <><ResetPassword token={resetToken} onDone={() => { location.hash = ""; load(); }} /><Toaster /></>;
-  if (err) return <div style={{ padding: "24px" }}><h2>AVOS</h2><p className="muted">{err}</p><Btn onClick={load}>Retry</Btn></div>;
+  if (err) return <div style={{ padding: "24px" }}><h1>AVOS</h1><p className="muted">{err}</p><Btn onClick={load}>Retry</Btn></div>;
   if (signedOut) return <><Login onSignedIn={load} devUsers={appEnv && appEnv !== "production" ? DEV_USERS : undefined} onDevUser={(u) => { setDevUser(u || null); load(); }} /><Toaster /></>;
   if (!me || !ref) return <div className="empty">Loading…</div>;
   if (me.must_change_password || changePw) return <><ChangePassword forced={!!me.must_change_password} hasPassword={!!me.has_password} onDone={() => { setChangePw(false); load(); }} /><Toaster /></>;
@@ -82,14 +82,15 @@ export function App() {
   const initials = me.actor.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const roleNote = LOCK[me.actor.role];
   return <>
-    <div className="topbar">
+    <a className="skip" href="#content">Skip to content</a>
+    <header className="topbar">
       <button type="button" className="btn menu-toggle" aria-controls="avos-navigation" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}>☰ Menu</button>
       <a className="mbrand" href="#"><span className="mark">A</span><span className="txt">AVOS</span></a>
       <div className="where"><Icon name="house" size={16} /><b>{me.property.name}</b><span>· {fmtDate(me.property.today)}</span></div>
       <div className="spacer" />
       {queued > 0 && <span className="queue">{queued} pending sync</span>}
       <button className="iconbtn" onClick={() => setThemeOpen(true)} title="Theme settings" aria-label="Theme settings"><Icon name="palette" /></button>
-      <button className="iconbtn" onClick={openNotifs} title="Notifications"><Icon name="bell" />{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
+      <button className="iconbtn" onClick={openNotifs} title="Notifications" aria-label={me.unread_notifications > 0 ? `Notifications, ${me.unread_notifications} unread` : "Notifications"}><Icon name="bell" />{me.unread_notifications > 0 && <b>{me.unread_notifications}</b>}</button>
       <details className="usermenu"><summary><span className="avatar">{initials}</span><span>{me.actor.name}</span><span className="role">· {me.actor.role}</span><Icon name="chevron" size={14} /></summary><div>
         <div className="sub"><b>{me.actor.name}</b> · {me.actor.role}<br />{me.actor.email}</div>
         <button onClick={(e: any) => { e.currentTarget.closest("details")?.removeAttribute("open"); setThemeOpen(true); }}><Icon name="palette" size={16} />Theme settings</button>
@@ -97,7 +98,7 @@ export function App() {
         <button onClick={signOut}><Icon name="logout" size={16} />Sign out</button>
         {devUser() && appEnv !== "production" && <div className="sub"><label>Dev user <select value={devUser() ?? ""} onChange={(e: any) => { setDevUser(e.currentTarget.value); location.hash = ""; load(); }}>{DEV_USERS.map((u) => <option value={u}>{u.split("@")[0]}</option>)}</select></label></div>}
       </div></details>
-    </div>
+    </header>
     <div className="shell">
       <nav className={`side ${navOpen ? "is-open" : ""}`} id="avos-navigation" aria-label="AVOS navigation">
         <a className="brand" href="#"><span className="mark">A</span><span><b>AVOS</b><small>{me.property.name}</small></span><button type="button" className="btn menu-close" aria-label="Close navigation" onClick={() => setNavOpen(false)}>×</button></a>
@@ -109,11 +110,11 @@ export function App() {
       </nav>
       {navOpen && <button type="button" className="menu-backdrop" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
       <div className="content">
-        <main id="content"><Comp me={me} refs={ref} /></main>
+        <main id="content" tabIndex={-1}><Comp me={me} refs={ref} /></main>
       </div>
     </div>
-    {me.capabilities.includes("tasks") && !["pay", "pexp", "ids"].includes(current.key) && <QuickCapture me={me} refs={ref} />}
-    {notifOpen && <div className="sheet" onClick={() => setNotifOpen(false)}><div onClick={(e) => e.stopPropagation()}><h3>Notifications</h3>{notifs.length === 0 ? <Empty>No notifications.</Empty> : notifs.map((n) => <div className="row" key={n.id}><div><div>{n.message}</div><div className="sub">{fmtDateTime(n.created_at)}</div></div></div>)}</div></div>}
+    {me.capabilities.includes("tasks") && !["pay", "pexp", "ids"].includes(current.key) && <aside aria-label="Quick entry"><QuickCapture me={me} refs={ref} /></aside>}
+    {notifOpen && <div className="sheet" onClick={() => setNotifOpen(false)} onKeyDown={(e) => { if (e.key === "Escape") setNotifOpen(false); }}><div role="dialog" aria-modal="true" aria-labelledby="notif-title" onClick={(e) => e.stopPropagation()}><div className="sheethead"><h2 id="notif-title">Notifications</h2><button type="button" className="btn small" aria-label="Close notifications" autoFocus onClick={() => setNotifOpen(false)}><Icon name="close" size={16} /></button></div>{notifs.length === 0 ? <Empty>No notifications.</Empty> : notifs.map((n) => <div className="row" key={n.id}><div><div>{n.message}</div><div className="sub">{fmtDateTime(n.created_at)}</div></div></div>)}</div></div>}
     {themeOpen && <ThemePanel onClose={() => setThemeOpen(false)} />}
     <Toaster />
   </>;

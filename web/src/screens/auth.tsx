@@ -16,7 +16,7 @@ export function Login({ onSignedIn, devUsers, onDevUser }: { onSignedIn: () => v
   };
   return <div className="authwrap"><form className="authcard" onSubmit={submit}>
     <Logo />
-    <h2>{mode === "login" ? "Sign in" : "Forgot password"}</h2>
+    <h1>{mode === "login" ? "Sign in" : "Forgot password"}</h1>
     <Field label="Email"><input type="email" autoComplete="username" required value={email} onChange={(e: any) => setEmail(e.currentTarget.value)} autoFocus /></Field>
     {mode === "login" && <Field label="Password"><input type="password" autoComplete="current-password" required value={password} onChange={(e: any) => setPassword(e.currentTarget.value)} /></Field>}
     {err && <div className="autherr">{err}</div>}
@@ -36,7 +36,7 @@ export function ResetPassword({ token, onDone }: { token: string; onDone: () => 
     setBusy(true);
     try { await post("/auth/reset", { token, password: p1 }); toast("Password set · signed in"); onDone(); } catch (ex: any) { setErr(ex?.message ?? String(ex)); } finally { setBusy(false); }
   };
-  return <div className="authwrap"><form className="authcard" onSubmit={submit}><Logo /><h2>Set your password</h2>
+  return <div className="authwrap"><form className="authcard" onSubmit={submit}><Logo /><h1>Set your password</h1>
     <Field label="New password" hint="at least 10 characters"><input type="password" autoComplete="new-password" required minLength={10} value={p1} onChange={(e: any) => setP1(e.currentTarget.value)} autoFocus /></Field>
     <Field label="Repeat it"><input type="password" autoComplete="new-password" required value={p2} onChange={(e: any) => setP2(e.currentTarget.value)} /></Field>
     {err && <div className="autherr">{err}</div>}
@@ -54,7 +54,7 @@ export function ChangePassword({ forced, hasPassword, onDone }: { forced: boolea
     setBusy(true);
     try { await post("/auth/change-password", { current_password: cur, new_password: p1 }); toast("Password changed"); onDone(); } catch (ex: any) { setErr(ex?.message ?? String(ex)); } finally { setBusy(false); }
   };
-  return <div className="authwrap"><form className="authcard" onSubmit={submit}><Logo /><h2>{forced ? "Choose your own password" : "Change password"}</h2>
+  return <div className="authwrap"><form className="authcard" onSubmit={submit}><Logo /><h1>{forced ? "Choose your own password" : "Change password"}</h1>
     {forced && <p className="muted">You signed in with a temporary password. Pick your own before continuing.</p>}
     {hasPassword && <Field label="Current password"><input type="password" autoComplete="current-password" required value={cur} onChange={(e: any) => setCur(e.currentTarget.value)} autoFocus /></Field>}
     <Field label="New password" hint="at least 10 characters"><input type="password" autoComplete="new-password" required minLength={10} value={p1} onChange={(e: any) => setP1(e.currentTarget.value)} /></Field>

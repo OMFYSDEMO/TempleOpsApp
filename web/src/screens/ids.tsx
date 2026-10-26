@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, get, post, del } from "../api";
-import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, fmtDate, fmtDateTime, useLoad, run, toast } from "../ui";
+import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, fmtDate, fmtDateTime, useLoad, run, toast, askConfirm } from "../ui";
 import type { Me, Ref } from "../app";
 
 /**
@@ -36,10 +36,10 @@ export function IdPanel({ me, bookingId, onClose, onChange }: { me: Me; bookingI
   const foreign = d.guest_nationality === "foreign";
   const docs: any[] = d.documents;
   const refresh = async () => { await q.reload(); onChange?.(); };
-  const setNat = (nationality: string) => {
+  const setNat = async (nationality: string) => {
     if (nationality === d.guest_nationality) return;
     // Marking a guest foreign asks sales to file Form C with the FRRO within 24 h: confirm it is meant.
-    if (nationality === "foreign" && !confirm(`Mark ${b?.guest?.name ?? "this guest"} as a foreign national?\n\nSales will be asked to file Form C with the FRRO within 24 hours of arrival.`)) return;
+    if (nationality === "foreign" && !(await askConfirm(`Mark ${b?.guest?.name ?? "this guest"} as a foreign national?`, "Sales will be asked to file Form C with the FRRO within 24 hours of arrival.", { ok: "Mark foreign" }))) return;
     run(async () => { await post(`/ids/bookings/${bookingId}/nationality`, { nationality }); await refresh(); });
   };
   const upload = async (file: File) => {
@@ -82,7 +82,7 @@ export function IdPanel({ me, bookingId, onClose, onChange }: { me: Me; bookingI
       {x.on_file_here ? <a href={`/api/ids/documents/${x.id}/file`} target="_blank" rel="noopener">{x.content_type.includes("pdf") ? <div className="pdf">PDF</div> : <img src={`/api/ids/documents/${x.id}/file`} alt="" loading="lazy" />}</a>
         : <a href={x.drive_link ?? "#"} target="_blank" rel="noopener"><div className="pdf">on Drive</div></a>}
       <div className="meta"><b>{DOC_LABEL[x.doc_type]}</b><span className="sub">{x.person_name}{x.note ? ` · ${x.note}` : ""}</span><span className="sub">{fmtDateTime(x.captured_at)}</span></div>
-      {canCapture && x.on_file_here && <Btn small kind="danger" onClick={() => { if (confirm("Remove this capture?")) run(async () => { await del(`/ids/documents/${x.id}`); await refresh(); }, "Removed"); }}>Remove</Btn>}
+      {canCapture && x.on_file_here && <Btn small kind="danger" onClick={async () => { if (await askConfirm("Remove this capture?", "The photo is deleted from AVOS.", { ok: "Remove", danger: true })) await run(async () => { await del(`/ids/documents/${x.id}`); await refresh(); }, "Removed"); }}>Remove</Btn>}
     </div>)}</div>}
   </Card>;
 }
@@ -99,7 +99,7 @@ export function GuestIds({ me }: { me: Me; refs: Ref }) {
     <div className="actions">{b.doc_count === 0 && b.status === "checked_in" && <Status s="pending" />}<Btn small onClick={() => show(b.id)}>{cta}</Btn></div>
   </div>;
   return <>
-    <h2>Guest IDs <small>photograph ID at check-in · Form C for foreign nationals within 24 h · files move to Google Drive 48 h after the stay</small></h2>
+    <h1>Guest IDs <small>photograph ID at check-in · Form C for foreign nationals within 24 h · files move to Google Drive 48 h after the stay</small></h1>
     {open && <IdPanel me={me} bookingId={open} onClose={() => show(null)} onChange={() => q.reload()} />}
     {!d ? <Loading error={q.error} /> : <>
       <div className="grid two">
@@ -135,7 +135,7 @@ export function DriveSettings() {
         <Row label="Connected as" value={d.account_email ?? "—"} sub={`since ${fmtDateTime(d.connected_at)}`} />
         <Row label="Folder" value={d.folder_link ? <a href={d.folder_link} target="_blank" rel="noopener">AVOS – Guest IDs</a> : "created on first archive"} />
         <Row label="Last archive run" value={d.last_used_at ? fmtDateTime(d.last_used_at) : "not yet"} sub={d.last_error ? `last error: ${d.last_error}` : undefined} />
-        <div className="actions end"><Btn onClick={() => run(async () => { const r = await post("/admin/integrations/google-drive/archive-now"); toast(`Archived ${r.archived} stay${r.archived === 1 ? "" : "s"}`); await q.reload(); })}>Archive now</Btn><Btn kind="danger" onClick={() => { if (confirm("Disconnect Google Drive? Documents will wait here until it is connected again.")) run(async () => { await del("/admin/integrations/google-drive"); await q.reload(); }, "Disconnected"); }}>Disconnect</Btn></div>
+        <div className="actions end"><Btn onClick={() => run(async () => { const r = await post("/admin/integrations/google-drive/archive-now"); toast(`Archived ${r.archived} stay${r.archived === 1 ? "" : "s"}`); await q.reload(); })}>Archive now</Btn><Btn kind="danger" onClick={async () => { if (await askConfirm("Disconnect Google Drive?", "Documents will wait here until it is connected again.", { ok: "Disconnect", danger: true })) await run(async () => { await del("/admin/integrations/google-drive"); await q.reload(); }, "Disconnected"); }}>Disconnect</Btn></div>
       </> : <>
         <div className="sub" style={{ marginBottom: "10px" }}>Connect the Google account whose Drive should hold the archive. AVOS asks only for access to the folder it creates.</div>
         <div className="actions"><Btn kind="primary" onClick={() => run(async () => { const r = await post("/admin/integrations/google-drive/connect"); location.href = r.url; })}>Connect Google Drive</Btn></div>

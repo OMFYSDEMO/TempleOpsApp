@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { get } from "../api";
-import { Card, Btn, Status, Empty, Loading, useLoad, inr, fmtDateTime } from "../ui";
+import { Card, Btn, Status, Empty, Loading, useLoad, inr, fmtDateTime, ScrollX } from "../ui";
 import type { Me, Ref } from "../app";
 
 /** How long something has waited, in words a person reads at a glance. */
@@ -30,7 +30,7 @@ export function MyWork({ me }: { me: Me; refs: Ref }) {
   const { items, raised, overdue } = q.data;
   const first = me.actor.name.split(" ")[0];
   return <>
-    <h2>My work <small>{items.length === 0 ? `Nothing waiting on you, ${first}.` : `${items.length} item${items.length > 1 ? "s" : ""} on you${overdue ? `, ${overdue} overdue` : ""}. Oldest first; nothing here is entered twice, it is what the books already know.`}</small></h2>
+    <h1>My work <small>{items.length === 0 ? `Nothing waiting on you, ${first}.` : `${items.length} item${items.length > 1 ? "s" : ""} on you${overdue ? `, ${overdue} overdue` : ""}. Oldest first; nothing here is entered twice, it is what the books already know.`}</small></h1>
     <div className="kpi">
       <div className="k"><small>On you now</small><b>{items.length}</b></div>
       <div className="k"><small>Overdue</small><b style={overdue ? { color: "var(--bad)" } : undefined}>{overdue}</b></div>
@@ -40,7 +40,7 @@ export function MyWork({ me }: { me: Me; refs: Ref }) {
     {items.length === 0 && <Card><Empty>Nothing on your desk. New emails, leads, arrivals, approvals and tasks appear here the moment they exist.</Empty></Card>}
     {raised.length > 0 && <Card title={me.actor.role === "owner" ? "Overdue elsewhere" : "Raised to you"} sub={me.actor.role === "owner" ? "waited past its tolerance on another desk; the person responsible has been told once" : "past its tolerance on the desk below you; nudge, or do it"}>{raised.map((it: any) => <Item key={it.key} it={it} raised />)}</Card>}
     {me.capabilities.includes("pnl_reports") && <Card title={`What slipped · last ${days} days`} sub="every item that went overdue, who had it, how long it waited · the conversation to have is about patterns, not single items" actions={<div className="actions">{[7, 14, 30].map((d) => <Btn key={d} small kind={d === days ? "primary" : undefined} onClick={() => setDays(d)}>{d} d</Btn>)}</div>}>
-      {!slipsQ.data ? <Loading /> : slipsQ.data.slips.length === 0 ? <Empty>Nothing slipped. That is the number to protect.</Empty> : <table className="t"><thead><tr><th>Item</th><th>Desk</th><th>Raised to</th><th className="num">Waited</th><th>Status</th></tr></thead><tbody>{slipsQ.data.slips.map((s: any) => <tr key={s.item_key}><td>{s.title}<div className="sub">{KIND_LABEL[s.kind] ?? s.kind} · {fmtDateTime(s.escalated_at)}</div></td><td>{s.owner_role}</td><td>{s.escalated_to}</td><td className="num">{age(s.waited_hours)}</td><td><Status s={s.cleared_at ? "done" : "open"} /></td></tr>)}</tbody></table>}
+      {!slipsQ.data ? <Loading /> : slipsQ.data.slips.length === 0 ? <Empty>Nothing slipped. That is the number to protect.</Empty> : <ScrollX><table className="t"><thead><tr><th>Item</th><th>Desk</th><th>Raised to</th><th className="num">Waited</th><th>Status</th></tr></thead><tbody>{slipsQ.data.slips.map((s: any) => <tr key={s.item_key}><td>{s.title}<div className="sub">{KIND_LABEL[s.kind] ?? s.kind} · {fmtDateTime(s.escalated_at)}</div></td><td>{s.owner_role}</td><td>{s.escalated_to}</td><td className="num">{age(s.waited_hours)}</td><td><Status s={s.cleared_at ? "done" : "open"} /></td></tr>)}</tbody></table></ScrollX>}
     </Card>}
     <span hidden>{inr(0)}</span>
   </>;

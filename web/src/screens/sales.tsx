@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { get, post, patch, del } from "../api";
-import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, inr, fmtDate, ago, useLoad, run, toast, todayIso } from "../ui";
+import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, inr, fmtDate, ago, useLoad, run, toast, todayIso, askText, askConfirm, ScrollX } from "../ui";
 import type { Me, Ref } from "../app";
 
 const SOURCES = [["instagram", "Instagram"], ["facebook", "Facebook"], ["website", "Website"], ["whatsapp", "WhatsApp"], ["phone", "Phone"], ["walkin", "Walk-in"], ["other", "Other"]] as const;
@@ -17,7 +17,7 @@ export function Leads({ me, refs }: { me: Me; refs: Ref }) {
   const create = () => run(async () => { await post("/leads", newLead); setShowNew(false); setNewLead({ ...newLead, name: "", phone: "" }); await q.reload(); }, "Lead captured");
   const act = (id: string, verb: string, body?: unknown, msg?: string) => run(async () => { const r = await post(`/leads/${id}/${verb}`, body); await q.reload(); return r; }, msg);
   return <>
-    <h2>Leads <small>W13 · Stage 0 · five statuses, lost takes a reason</small></h2>
+    <h1>Leads <small>every enquiry from first contact to booking; a lost lead needs a reason</small></h1>
     <div className="actions" style={{ marginBottom: "10px" }}><Chips value={filter} options={[{ value: "", label: "Open" }, { value: "new", label: "New" }, { value: "quoted", label: "Quoted" }, { value: "hold", label: "Hold" }, { value: "won", label: "Won" }, { value: "lost", label: "Lost" }]} onChange={(v) => setFilter(v || null)} /><span className="spacer" /><Btn kind="primary" onClick={() => setShowNew(!showNew)}>+ Lead</Btn></div>
     {showNew && <Card title="New lead · 3 taps + a name"><Chips value={newLead.source} options={SOURCES.map(([v, l]) => ({ value: v, label: l }))} onChange={(v) => setNewLead({ ...newLead, source: v })} />
       <div className="grid two"><Field label="Name"><input value={newLead.name} onChange={(e: any) => setNewLead({ ...newLead, name: e.currentTarget.value })} /></Field><Field label="Phone"><input inputMode="tel" value={newLead.phone} onChange={(e: any) => setNewLead({ ...newLead, phone: e.currentTarget.value })} /></Field>
@@ -44,7 +44,7 @@ export function Leads({ me, refs }: { me: Me; refs: Ref }) {
         </div>
       </Card>;
     })}
-    <Card title="Funnel · measured from the books" sub="conversion and revenue per source, not call counts">{!funnel.data ? <Loading /> : funnel.data.funnel.length === 0 ? <Empty>No leads yet.</Empty> : <table className="t"><thead><tr><th>Source</th><th className="num">Leads</th><th className="num">Open</th><th className="num">Won</th><th className="num">Lost</th><th className="num">Revenue</th></tr></thead><tbody>{funnel.data.funnel.map((f: any) => <tr key={f.source}><td>{f.source}</td><td className="num">{f.leads}</td><td className="num">{f.open}</td><td className="num">{f.won}</td><td className="num">{f.lost}</td><td className="num">{inr(f.revenue_paise)}</td></tr>)}</tbody></table>}</Card>
+    <Card title="Funnel · measured from the books" sub="conversion and revenue per source, not call counts">{!funnel.data ? <Loading /> : funnel.data.funnel.length === 0 ? <Empty>No leads yet.</Empty> : <ScrollX><table className="t"><thead><tr><th>Source</th><th className="num">Leads</th><th className="num">Open</th><th className="num">Won</th><th className="num">Lost</th><th className="num">Revenue</th></tr></thead><tbody>{funnel.data.funnel.map((f: any) => <tr key={f.source}><td>{f.source}</td><td className="num">{f.leads}</td><td className="num">{f.open}</td><td className="num">{f.won}</td><td className="num">{f.lost}</td><td className="num">{inr(f.revenue_paise)}</td></tr>)}</tbody></table></ScrollX>}</Card>
   </>;
 }
 
@@ -63,7 +63,7 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
     toast(it.kind === "cancellation" ? "Booking cancelled · rooms released" : r.booking?.status === "approved" ? "Booked · it is in Reservations" : `Booked · awaiting approval (${(r.booking?.approval?.reasons ?? []).join(", ")})`);
   });
   return <>
-    <h2>Inbox — bookings <small>STAAH, SwiftBook and Airpay emails book, cancel and record themselves when the facts line up; the rest wait here for one tap</small></h2>
+    <h1>Inbox — bookings <small>STAAH, SwiftBook and Airpay emails book, cancel and record themselves when the facts line up; the rest wait here for one tap</small></h1>
     <Chips value={status} options={[{ value: "pending", label: "Needs a person" }, { value: "approved", label: "Done · auto and approved" }, { value: "duplicate", label: "Already in the books" }, { value: "dismissed", label: "Dismissed" }]} onChange={setStatus} />
     {!q.data ? <Loading error={q.error} /> : q.data.items.length === 0 ? <Empty>Nothing to review.</Empty> : q.data.items.map((it: any) => {
       const d = it.parsed ?? {}; const sel = chosen(it); const opts: any[] = it.room_options ?? [];
@@ -204,7 +204,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   }).sort((a: any, b: any) => filter === "past" || filter === "cancelled" ? (a.check_in < b.check_in ? 1 : -1) : (a.check_in > b.check_in ? 1 : -1));
   const counts = { upcoming: (q.data?.bookings ?? []).filter((b: any) => ["provisional", "approved"].includes(b.status) && b.check_out >= today).length, inhouse: (q.data?.bookings ?? []).filter((b: any) => b.status === "checked_in").length };
   return <>
-    <h2>Reservations <small>pick the dates, tap the rooms, the money adds itself up · on-tariff bookings approve themselves, exceptions go to the revenue desk</small></h2>
+    <h1>Reservations <small>pick the dates, tap the rooms, the money adds itself up · on-tariff bookings approve themselves, exceptions go to the revenue desk</small></h1>
     <Card title="New booking" sub="three steps: the stay, the rooms, the guest">
       {fromInbox && <div className="note">Booking by hand from the email <b>{fromInbox.subject}</b>. Whatever the email carried is filled in below; check the dates, tap the room, save. The inbox card is marked done when you save. <a href="#inbox" onClick={() => { try { sessionStorage.removeItem("avos.bookFromInbox"); } catch {} setFromInbox(null); }}>Cancel and go back</a></div>}
       <div className="section"><div className="sectionhead"><b>1 · Stay</b><span className="sub">{totals.nights > 0 ? `${totals.nights} night${totals.nights > 1 ? "s" : ""} · ${fmtDate(f.check_in)} → ${fmtDate(f.check_out)}` : "check-out must be after check-in"}</span></div>
@@ -237,7 +237,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
 
     <Card title={me.actor.role === "sales" ? "My bookings" : "Bookings"} actions={<input className="search" placeholder="Search guest, phone, reference" value={search} onChange={(e: any) => setSearch(e.currentTarget.value)} />}>
       <Chips value={filter} options={[{ value: "upcoming", label: `Upcoming · ${counts.upcoming}` }, { value: "inhouse", label: `In house · ${counts.inhouse}` }, { value: "past", label: "Past" }, { value: "cancelled", label: "Cancelled" }, { value: "all", label: "All" }]} onChange={setFilter} />
-      {!q.data ? <Loading error={q.error} /> : list.length === 0 ? <Empty>{filter === "upcoming" ? "No upcoming stays." : "Nothing here."}</Empty> : <div className="table-wrap"><table className="t bookings"><thead><tr><th>Guest</th><th>Stay</th><th>Rooms</th><th>Channel</th><th className="num">Gross</th><th className="num">Balance</th><th>Status</th><th></th></tr></thead><tbody>{list.map((b: any) => <tr key={b.id} className={open === b.id ? "open" : ""} onClick={() => setOpen(open === b.id ? null : b.id)}>
+      {!q.data ? <Loading error={q.error} /> : list.length === 0 ? <Empty>{filter === "upcoming" ? "No upcoming stays." : "Nothing here."}</Empty> : <ScrollX><table className="t bookings"><thead><tr><th>Guest</th><th>Stay</th><th>Rooms</th><th>Channel</th><th className="num">Gross</th><th className="num">Balance</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{list.map((b: any) => <tr key={b.id} className={open === b.id ? "open" : ""} onClick={() => setOpen(open === b.id ? null : b.id)}>
         <td><b>{b.guest_name}</b>{b.guest_phone && <small>{b.guest_phone}</small>}</td>
         <td>{fmtDate(b.check_in)} → {fmtDate(b.check_out)}<small>{b.nights} night{b.nights > 1 ? "s" : ""}{b.external_ref ? ` · ref ${b.external_ref}` : ""}</small></td>
         <td><span className="roomchips">{String(b.room_names ?? "").split(", ").filter(Boolean).map((n: string) => <i key={n}>{n}</i>)}</span></td>
@@ -246,7 +246,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
         <td className="num">{b.gross_paise - b.paid_paise > 0 ? <span style={{ color: "var(--amb)" }}>{inr(b.gross_paise - b.paid_paise)}</span> : <span className="muted">paid</span>}</td>
         <td><Status s={b.status} />{b.rate_vs_tariff === "below" && <> <Status s="below" /></>}</td>
         <td className="actions"><Btn small onClick={() => setOpen(open === b.id ? null : b.id)}>{open === b.id ? "Close" : "Open"}</Btn></td>
-      </tr>)}</tbody></table></div>}
+      </tr>)}</tbody></table></ScrollX>}
     </Card>
 
     {open && detail.data && <BookingDetail me={me} refs={refs} d={detail.data} rooms={rooms} tariffFor={tariffFor} onChange={async () => { await Promise.all([q.reload(), detail.reload()]); }} onClose={() => setOpen(null)} />}
@@ -259,13 +259,13 @@ function BookingDetail({ me, refs, d, rooms, tariffFor, onChange, onClose }: { m
   const canDelete = b.status === "provisional" && (me.actor.role !== "sales" || b.created_by === me.actor.id) && d.paid_paise === 0;
   const roomTotal = d.rooms.reduce((s: number, r: any) => s + r.room_total_paise, 0); const gst = d.rooms.reduce((s: number, r: any) => s + r.gst_paise, 0);
   const guests = `${b.adults} adult${b.adults > 1 ? "s" : ""}${b.children ? `, ${b.children} child${b.children > 1 ? "ren" : ""}` : ""}`;
-  const cancel = () => { const reason = prompt("Cancellation reason"); if (reason) run(async () => { await post(`/bookings/${b.id}/cancel`, { reason }); await onChange(); }, "Cancelled · rooms released"); };
-  const remove = () => run(async () => { await del(`/bookings/${b.id}`); onClose(); await onChange(); }, "Deleted");
+  const cancel = async () => { const reason = await askText(`Cancel ${d.guest?.name ?? "this booking"}'s booking?`, "Cancellation reason", { ok: "Cancel booking", cancel: "Keep booking", danger: true, body: "The rooms are released at once." }); if (reason) await run(async () => { await post(`/bookings/${b.id}/cancel`, { reason }); await onChange(); }, "Cancelled · rooms released"); };
+  const remove = async () => { if (await askConfirm(`Delete ${d.guest?.name ?? "this"} booking?`, "Use this only for a booking made by mistake. Nothing has been paid on it, so it leaves no trace in the books.", { ok: "Delete", danger: true })) await run(async () => { await del(`/bookings/${b.id}`); onClose(); await onChange(); }, "Deleted"); };
   return <section className="card detail">
     <div className="detailhead">
       <div>
         <div className="eyebrow">Booking info</div>
-        <h3 className="big">{d.guest.name}</h3>
+        <h2 className="big">{d.guest.name}</h2>
         <div className="pills"><Status s={b.status} />{b.rate_vs_tariff === "below" && <Status s="below" />}</div>
         <div className="sub">{d.channel.name}{b.external_ref ? ` · ref ${b.external_ref}` : ""}{d.guest.phone ? ` · ${d.guest.phone}` : ""}{d.guest.email ? ` · ${d.guest.email}` : ""}</div>
       </div>
@@ -348,10 +348,10 @@ export function Availability({ refs }: { me: Me; refs: Ref }) {
   const q = useLoad(() => get(`/bookings/availability?from=${from}&to=${to}`), [from]);
   const nights = Array.from({ length: days }, (_, i) => new Date(Date.parse(from) + i * 86400000).toISOString().slice(0, 10));
   return <>
-    <h2>Availability <small>room-nights: booked, held (48 h) or free — the double-booking guard</small></h2>
-    <div className="actions" style={{ marginBottom: "10px" }}><Btn onClick={() => setFrom(new Date(Date.parse(from) - days * 86400000).toISOString().slice(0, 10))}>← {days} d</Btn><input type="date" value={from} onChange={(e: any) => setFrom(e.currentTarget.value)} /><Btn onClick={() => setFrom(new Date(Date.parse(from) + days * 86400000).toISOString().slice(0, 10))}>{days} d →</Btn></div>
-    {!q.data ? <Loading error={q.error} /> : <Card><div className="avail"><div className="r"><div className="n"></div>{nights.map((n) => <div className="c h" key={n}>{n.slice(8)}/{n.slice(5, 7)}</div>)}</div>
-      {q.data.rooms.map((r: any) => <div className="r" key={r.id}><div className="n">{r.name}</div>{nights.map((n) => { const t = q.data.taken.find((x: any) => x.room_id === r.id && x.night === n); return <div key={n} className={`c ${t ? t.kind : ""}`} title={t ? `${t.kind} · ${t.guest_name ?? t.lead_id ?? ""}` : "free"}>{t ? (t.guest_name ?? "hold").slice(0, 3) : ""}</div>; })}</div>)}</div></Card>}
+    <h1>Availability <small>room-nights: booked, held (48 h) or free — the double-booking guard</small></h1>
+    <div className="actions" style={{ marginBottom: "10px" }}><Btn title={`Previous ${days} days`} onClick={() => setFrom(new Date(Date.parse(from) - days * 86400000).toISOString().slice(0, 10))}>← {days} d</Btn><input type="date" aria-label="Show from" value={from} onChange={(e: any) => setFrom(e.currentTarget.value)} /><Btn title={`Next ${days} days`} onClick={() => setFrom(new Date(Date.parse(from) + days * 86400000).toISOString().slice(0, 10))}>{days} d →</Btn><span className="legend" aria-hidden="true"><i className="c booked" />booked<i className="c hold" />held<i className="c" />free</span></div>
+    {!q.data ? <Loading error={q.error} /> : <Card><ScrollX className="avail" label="Availability"><div role="table" aria-label={`Room availability from ${fmtDate(from)}`}><div className="r" role="row"><div className="n" role="columnheader"><span className="sr-only">Room</span></div>{nights.map((n) => <div className="c h" role="columnheader" key={n}>{n.slice(8)}/{n.slice(5, 7)}</div>)}</div>
+      {q.data.rooms.map((r: any) => <div className="r" role="row" key={r.id}><div className="n" role="rowheader">{r.name}</div>{nights.map((n) => { const t = q.data.taken.find((x: any) => x.room_id === r.id && x.night === n); const what = t ? `${t.kind === "hold" ? "held" : "booked"}${t.guest_name ? ` · ${t.guest_name}` : ""}` : "free"; return <div key={n} role="cell" className={`c ${t ? t.kind : ""}`} title={what} aria-label={`${fmtDate(n)}: ${what}`}>{t ? (t.guest_name ?? "hold").slice(0, 3) : ""}</div>; })}</div>)}</div></ScrollX></Card>}
   </>;
 }
 export { patch as _p };

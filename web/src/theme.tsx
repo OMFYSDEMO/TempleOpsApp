@@ -50,7 +50,7 @@ export function ThemePanel({ onClose }: { onClose: () => void }) {
   return <>
     <button type="button" className="drawer-backdrop" aria-label="Close theme settings" onClick={onClose} />
     <aside className="drawer" role="dialog" aria-label="Theme settings">
-      <header><div><h3>Theme settings</h3><div className="sub">Changes apply at once and are saved on this device</div></div><button type="button" className="btn small" aria-label="Close" onClick={onClose}><Icon name="close" size={16} /></button></header>
+      <header><div><h2>Theme settings</h2><div className="sub">Changes apply at once and are saved on this device</div></div><button type="button" className="btn small" aria-label="Close" onClick={onClose}><Icon name="close" size={16} /></button></header>
       <div className="body">
         <div className="opt"><b>Mode</b>
           <Seg label="Mode" value={t.theme} onChange={(v) => set("theme", v)} options={[{ value: "light", label: "Light", icon: <Icon name="sun" /> }, { value: "dark", label: "Dark", icon: <Icon name="moon" /> }, { value: "system", label: "Device", icon: <Icon name="monitor" /> }]} />
