@@ -93,3 +93,20 @@ describe("Invoices for OTA-collected stays", () => {
     expect(String(html.json.raw ?? html.json)).toContain("Paid through Agoda");
   });
 });
+
+describe("Form C marked by mistake", () => {
+  beforeAll(seed);
+  it("switching a stay back to Indian withdraws the unread Form C notifications and the overdue escalation", async () => {
+    const ci = addDays(todayIn("Asia/Kolkata"), -2);
+    const b = await ok("shaji", "POST", "/api/bookings", { guest_name: "Indian Guest", guest_phone: "9500000601", channel_code: "direct", check_in: ci, check_out: addDays(todayIn("Asia/Kolkata"), 1), rooms: [{ room_id: "loc_r4", nightly_rate_paise: 700000 }] });
+    await ok("sindhu", "POST", `/api/bookings/${b.booking.id}/check-in`, { arrived_at: `${ci}T14:00:00+05:30` });
+    await ok("sindhu", "POST", `/api/ids/bookings/${b.booking.id}/nationality`, { nationality: "foreign" });
+    await ok("trupti", "GET", "/api/work"); // the work queue raises the overdue item (arrival was 2 days ago)
+    const before = await sql("SELECT kind FROM notifications WHERE ref_id IN (?, ?)", b.booking.id, `formc:${b.booking.id}`);
+    expect(before.map((n: any) => n.kind)).toContain("form_c_due");
+    await ok("sindhu", "POST", `/api/ids/bookings/${b.booking.id}/nationality`, { nationality: "indian" });
+    expect(await sql("SELECT kind FROM notifications WHERE kind = 'form_c_due' AND ref_id = ?", b.booking.id)).toHaveLength(0);
+    expect(await sql("SELECT kind FROM notifications WHERE ref_kind = 'work' AND ref_id = ?", `formc:${b.booking.id}`)).toHaveLength(0);
+    expect(JSON.stringify(await ok("prachi", "GET", "/api/work"))).not.toContain(`formc:${b.booking.id}`);
+  });
+});

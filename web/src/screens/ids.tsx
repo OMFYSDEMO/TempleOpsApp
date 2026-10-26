@@ -36,7 +36,12 @@ export function IdPanel({ me, bookingId, onClose, onChange }: { me: Me; bookingI
   const foreign = d.guest_nationality === "foreign";
   const docs: any[] = d.documents;
   const refresh = async () => { await q.reload(); onChange?.(); };
-  const setNat = (nationality: string) => run(async () => { await post(`/ids/bookings/${bookingId}/nationality`, { nationality }); await refresh(); });
+  const setNat = (nationality: string) => {
+    if (nationality === d.guest_nationality) return;
+    // Marking a guest foreign asks sales to file Form C with the FRRO within 24 h: confirm it is meant.
+    if (nationality === "foreign" && !confirm(`Mark ${b?.guest?.name ?? "this guest"} as a foreign national?\n\nSales will be asked to file Form C with the FRRO within 24 hours of arrival.`)) return;
+    run(async () => { await post(`/ids/bookings/${bookingId}/nationality`, { nationality }); await refresh(); });
+  };
   const upload = async (file: File) => {
     setBusy(true);
     try {

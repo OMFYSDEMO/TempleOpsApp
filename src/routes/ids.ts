@@ -50,6 +50,10 @@ r.post("/bookings/:id/nationality", requireCap("ids_capture"), async (c) => {
   const b = new Batch(c.env.DB, actor);
   b.add("UPDATE bookings SET guest_nationality = ?, form_c_status = ?, updated_at = ? WHERE id = ?", nat, formC, nowIso(), bk.id);
   b.audit("booking.nationality", "booking", bk.id, { guest_nationality: bk.guest_nationality, form_c_status: bk.form_c_status }, { guest_nationality: nat, form_c_status: formC });
+  // Marked foreign by mistake and switched back: withdraw the Form C messages it sent (unread ones), including the overdue escalation.
+  if (bk.form_c_status === "due" && formC === "none") {
+    b.add("DELETE FROM notifications WHERE read_at IS NULL AND ((kind = 'form_c_due' AND ref_id = ?) OR (ref_kind = 'work' AND ref_id = ?))", bk.id, `formc:${bk.id}`);
+  }
   if (nat === "foreign" && bk.form_c_status !== "due" && formC === "due") await notifyRole(b, p.id, "sales", "form_c_due", `Form C to file for ${bk.guest_name ?? "a foreign guest"} · within ${FORM_C_HOURS} h of arrival`, { kind: "booking", id: bk.id });
   await b.run();
   return c.json({ ok: true, guest_nationality: nat, form_c_status: formC });
