@@ -342,3 +342,4 @@ main:focus { outline: none; }
 .table-wrap, .avail { position: relative; }
 @media (max-width: 600px) { .row:has(> .actions) { flex-wrap: wrap; } .row > .actions { max-width: 100%; } .row > .actions select { max-width: 100%; } }
 code { overflow-wrap: anywhere; }
+.avail .r { grid-template-columns: minmax(96px, max-content); grid-auto-columns: minmax(44px, 1fr); } .avail .r .n { position: sticky; left: 0; z-index: 1; background: var(--card); padding-right: 6px; white-space: nowrap; }
