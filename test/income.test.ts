@@ -6,13 +6,13 @@ describe("Other income", () => {
   beforeAll(async () => { await seed(); await sql("UPDATE properties SET gstin = '32AARCM3606J1ZD' WHERE id = 'prop_meadows'"); });
 
   it("records income with the GST split, lands in the account and in revenue", async () => {
-    const before = await ok("sindhu", "GET", "/api/payments/accounts");
+    const before = await ok("trupti", "GET", "/api/payments/accounts");
     const cashBefore = before.accounts.find((a: any) => a.id === "acc_cash").balance_paise;
     const r = await ok("sindhu", "POST", "/api/income", { on_date: "2026-09-05", category: "dining", description: "Lunch sadhya × 9", payer_name: "Anjita", amount_paise: 450000, gst_rate_bp: 500, method: "cash" });
     expect(r.taxable_paise + r.gst_paise).toBe(450000);
     expect(r.gst_paise).toBe(21429); // 4500 inclusive at 5% → 214.29 GST
     expect(r.account_id).toBe("acc_cash");
-    const after = await ok("sindhu", "GET", "/api/payments/accounts");
+    const after = await ok("trupti", "GET", "/api/payments/accounts");
     expect(after.accounts.find((a: any) => a.id === "acc_cash").balance_paise - cashBefore).toBe(450000);
     const rev = await ok("trupti", "GET", "/api/reports/revenue?period=2026-09");
     expect(rev.other_income.n).toBe(1);

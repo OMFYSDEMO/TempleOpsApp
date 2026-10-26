@@ -140,7 +140,9 @@ export const CAN: Record<string, Role[]> = {
   gst: ["accountant", "owner"],
   admin: ["owner"],
   audit: ["owner", "accountant", "revenue"],
-  balances: ["property", "revenue", "owner", "accountant"],
+  // What an account holds (cash in hand, petty cash, banks). Not the front desk: the person holding the cash counts it
+  // without seeing the books' figure (a blind count) and the revenue desk checks the difference.
+  balances: ["revenue", "owner", "accountant"],
   // Bank balances, account numbers, OTA terms, gateway fees, bank alerts: the revenue desk, the owner and the CA only.
   // The front desk and sales see the money they record themselves, nothing else.
   finance: ["revenue", "owner", "accountant"],

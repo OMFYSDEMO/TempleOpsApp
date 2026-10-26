@@ -56,6 +56,8 @@ r.get("/petty-statement", async (c) => {
   const out = transfers.filter((t: any) => t.from_account_id === acct.id).reduce((a: number, t: any) => a + t.amount_paise, 0);
   const spent = (await one<{ v: number }>(c.env.DB, "SELECT COALESCE(SUM(amount_paise),0) AS v FROM expenses WHERE paid_from_account_id = ? AND voided_at IS NULL AND on_date >= ? AND on_date <= ?", acct.id, start, end))?.v ?? 0;
   const received = inMonth + spent + out - topups; // collections / other income that landed in petty cash directly
+  // The petty cash holder sees the month's movements (top-ups, bills, pay-outs) but not the balance: blind count.
+  if (!allowed(actor, "balances")) return c.json({ period, account: { id: acct.id, name: acct.name }, balances_hidden: true, topups_paise: topups, spent_paise: spent, paid_out_paise: out, transfers });
   return c.json({ period, account: { id: acct.id, name: acct.name, opening_paise: acct.opening_paise, opening_date: acct.opening_date }, opening_paise: opening, topups_paise: topups, received_paise: received, spent_paise: spent, paid_out_paise: out, closing_paise: opening + inMonth, transfers });
 });
 

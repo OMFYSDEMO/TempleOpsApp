@@ -10,12 +10,13 @@ describe("Who sees the money", () => {
     await env.DB.prepare("UPDATE money_accounts SET account_no = '3390' WHERE id = 'acc_bank'").run();
   });
 
-  it("the front desk sees the cash it holds, not the banks or the gateway", async () => {
-    const desk = await ok("sindhu", "GET", "/api/payments/accounts");
-    const kinds = desk.accounts.map((a: any) => a.holder_role);
-    expect(desk.accounts.length).toBeGreaterThan(0);
-    expect(kinds.every((k: string) => k === "property")).toBe(true);
-    expect(desk.accounts.find((a: any) => a.kind === "bank")).toBeUndefined();
+  it("the front desk sees no balance at all, not even the cash it holds (blind count)", async () => {
+    expect((await api("sindhu", "GET", "/api/payments/accounts")).status).toBe(403);
+    expect((await api("prachi", "GET", "/api/payments/accounts")).status).toBe(403);
+    const book = await ok("sindhu", "GET", "/api/expenses/petty-statement");
+    expect(book.balances_hidden).toBe(true);
+    for (const k of ["opening_paise", "closing_paise", "received_paise"]) expect(k in book).toBe(false);
+    expect(book.account).toEqual({ id: expect.any(String), name: expect.any(String) });
     const owner = await ok("shaji", "GET", "/api/payments/accounts");
     expect(owner.accounts.find((a: any) => a.kind === "bank")).toBeTruthy();
     const ca = await ok("ca", "GET", "/api/payments/accounts");

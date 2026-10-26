@@ -57,7 +57,8 @@ export function Payments({ me, refs }: { me: Me; refs: Ref }) {
   const due = useLoad(() => get("/payments/due"), []);
   const gw = useLoad(() => get("/payments/gateway-inbox"), []);
   const recent = useLoad(() => get("/payments"), []);
-  const accounts = useLoad(() => get("/payments/accounts"), []);
+  const seeBalances = me.capabilities.includes("balances");
+  const accounts = useLoad(() => seeBalances ? get("/payments/accounts") : Promise.resolve(null), []);
   const [sel, setSel] = useState<any>(null); const [amt, setAmt] = useState(0); const [method, setMethod] = useState<string>("upi"); const [refn, setRefn] = useState("");
   const [bankId, setBankId] = useState(defaultBankId(refs.accounts));
   useEffect(() => { const pre = sessionStorage.getItem("avos.collect"); if (pre && due.data) { const d = due.data.due.find((x: any) => x.booking_id === pre); if (d) { setSel(d); setAmt(d.balance_paise); } sessionStorage.removeItem("avos.collect"); } }, [due.data]);
@@ -81,7 +82,7 @@ export function Payments({ me, refs }: { me: Me; refs: Ref }) {
     </div>
     {gw.data && gw.data.items.length > 0 && <Card title="From inbox · Airpay" sub="order-id prefix match to the SwiftBook itinerary">{gw.data.items.map((it: any) => <div className="row" key={it.id}><div><div>Order <span className="mono">{it.parsed.order_id}</span> · {inr(it.parsed.amount_paise)} · payer {it.parsed.payer_name ?? "?"}</div><div className="sub">{it.suggested_booking ? `Matched — ${it.suggested_booking.guest_name} (itinerary ${it.suggested_booking.external_ref})` : "No stay matched: confirm as an unlinked receipt or dismiss"}</div></div><div className="actions"><Btn small kind="primary" onClick={() => confirmGw(it)}>Confirm</Btn><Btn small onClick={() => run(async () => { await post(`/inbox/${it.id}/dismiss`, { reason: "not ours" }); await gw.reload(); }, "Dismissed")}>Dismiss</Btn></div></div>)}</Card>}
     <div className="grid two">
-      <Card title="Money accounts" sub="who holds the money records it">{!accounts.data ? <Loading /> : accounts.data.accounts.map((a: any) => <Row key={a.id} label={a.name} sub={`${a.kind.replace("_", " ")} · ${a.holder_role}`} value={inr(a.balance_paise)} />)}
+      <Card title={seeBalances ? "Money accounts" : "Cash deposits and top-ups"} sub={seeBalances ? "who holds the money records it" : "count the cash you hold and record what you deposit; the revenue desk checks it against the books"}>{seeBalances && (!accounts.data ? <Loading /> : accounts.data.accounts.map((a: any) => <Row key={a.id} label={a.name} sub={`${a.kind.replace("_", " ")} · ${a.holder_role}`} value={inr(a.balance_paise)} />))}
         {me.capabilities.includes("transfers") && <details><summary>Deposit cash / top up petty cash (a transfer, never an expense)</summary>
           <Field label="From"><select value={trf.from_account_id} onChange={(e: any) => setTrf({ ...trf, from_account_id: e.currentTarget.value })}><option value="">—</option>{refs.accounts.map((a) => <option value={a.id}>{a.name}</option>)}</select></Field>
           <Field label="To"><select value={trf.to_account_id} onChange={(e: any) => setTrf({ ...trf, to_account_id: e.currentTarget.value })}><option value="">—</option>{refs.accounts.map((a) => <option value={a.id}>{a.name}</option>)}</select></Field>
@@ -161,7 +162,8 @@ export function Expenses({ me, refs }: { me: Me; refs: Ref }) {
   const [scope, setScope] = useState<"petty" | "bank" | "all">(canSeeAll ? "all" : "petty");
   const q = useLoad(() => get(`/expenses?scope=${scope}&period=${period}`), [period, scope]);
   const stmt = useLoad(() => get(`/expenses/petty-statement?period=${period}`), [period]);
-  const accounts = useLoad(() => get("/payments/accounts"), []);
+  const seeBalances = me.capabilities.includes("balances");
+  const accounts = useLoad(() => seeBalances ? get("/payments/accounts") : Promise.resolve(null), []);
   const [edit, setEdit] = useState<Record<string, any>>({});
   const petty = accounts.data?.accounts.find((a: any) => a.kind === "petty_cash");
   const st = stmt.data;
@@ -169,9 +171,10 @@ export function Expenses({ me, refs }: { me: Me; refs: Ref }) {
   const scopeOptions = SCOPES.filter(([v]) => v === "petty" || (v === "bank" && canSeeBank) || (v === "all" && canSeeAll)).map(([value, label]) => ({ value, label }));
   return <>
     <h1>Expenses & petty cash <small>petty cash is the property manager's float; the bank is the owner's</small></h1>
-    <div className="kpi"><div className="k"><small>Petty cash in hand today</small><b>{petty ? inr(petty.balance_paise) : "—"}</b></div><div className="k"><small>Opening · carried into {monthName.split(" ")[0]}</small><b>{st ? inr(st.opening_paise) : "—"}</b></div><div className="k"><small>Spent in {monthName.split(" ")[0]} (petty)</small><b>{st ? inr(st.spent_paise) : "—"}</b></div><div className="k"><small>Top-ups in {monthName.split(" ")[0]}</small><b>{st ? inr(st.topups_paise) : "—"}</b></div></div>
+    {seeBalances ? <div className="kpi"><div className="k"><small>Petty cash in hand today</small><b>{petty ? inr(petty.balance_paise) : "—"}</b></div><div className="k"><small>Opening · carried into {monthName.split(" ")[0]}</small><b>{st?.opening_paise !== undefined ? inr(st.opening_paise) : "—"}</b></div><div className="k"><small>Spent in {monthName.split(" ")[0]} (petty)</small><b>{st ? inr(st.spent_paise) : "—"}</b></div><div className="k"><small>Top-ups in {monthName.split(" ")[0]}</small><b>{st ? inr(st.topups_paise) : "—"}</b></div></div>
+      : <div className="kpi"><div className="k"><small>Spent from petty cash in {monthName.split(" ")[0]}</small><b>{st ? inr(st.spent_paise) : "—"}</b></div><div className="k"><small>Top-ups received in {monthName.split(" ")[0]}</small><b>{st ? inr(st.topups_paise) : "—"}</b></div><div className="k"><small>Bills this month</small><b>{q.data && scope === "petty" ? q.data.expenses.filter((e: any) => !e.voided_at).length : "—"}</b></div></div>}
     <Field label="Month"><input type="month" value={period} onChange={(e: any) => setPeriod(e.currentTarget.value)} /></Field>
-    <Card title={`Petty cash book · ${monthName}`} sub="the closing balance carries forward as next month's opening — the float is never reset" tone={st && st.closing_paise < 0 ? "amb" : undefined}>
+    {seeBalances && <Card title={`Petty cash book · ${monthName}`} sub="the closing balance carries forward as next month's opening — the float is never reset" tone={st && st.closing_paise < 0 ? "amb" : undefined}>
       {!st ? <Loading error={stmt.error} /> : <>
         <Row label="Opening balance" sub="carried forward from the previous month" value={inr(st.opening_paise)} />
         {st.transfers.filter((t: any) => t.to_account_id === st.account.id).map((t: any) => <Row key={t.id} label={`+ Top-up from ${t.from_name}`} sub={`${fmtDate(t.on_date)}${t.note ? ` · ${t.note}` : ""}`} value={inr(t.amount_paise)} />)}
@@ -180,7 +183,7 @@ export function Expenses({ me, refs }: { me: Me; refs: Ref }) {
         {st.transfers.filter((t: any) => t.from_account_id === st.account.id).map((t: any) => <Row key={t.id} label={`− Paid out to ${t.to_name}`} sub={`${fmtDate(t.on_date)}${t.note ? ` · ${t.note}` : ""}`} value={inr(t.amount_paise)} />)}
         <Row strong label="Closing balance" sub={st.closing_paise < 0 ? "negative: a top-up or the opening float is missing from the books" : "carries into next month"} value={inr(st.closing_paise)} />
       </>}
-    </Card>
+    </Card>}
     {scopeOptions.length > 1 && <Chips value={scope} options={scopeOptions} onChange={setScope} />}
     <Card title={scope === "petty" ? "Petty-cash bills" : scope === "bank" ? "Bank-paid bills" : "All bills this month"} sub={scope === "petty" ? "capture first, classify later: vendor and bill number can be filled from the photo here" : "petty cash and bank together, as the P&L counts them"}>{!q.data ? <Loading error={q.error} /> : q.data.expenses.length === 0 ? <Empty>No {scope === "all" ? "" : scope === "bank" ? "bank-paid " : "petty-cash "}expenses in {monthName}.</Empty> : q.data.expenses.map((e: any) => { const ed = edit[e.id]; return <div className="row" key={e.id}><div style={{ flex: 1 }}><div>{catLabel(refs, e.category)} · {e.description ?? "—"} {e.voided_at && <Status s="void" />}{e.kind !== "normal" && <Status s={e.kind} />}</div><div className="sub">{fmtDate(e.on_date)} · {e.account_name}{e.kind === "normal" ? <> · {e.vendor_name ?? <span style={{ color: "var(--amb)" }}>vendor missing</span>} · {e.bill_no ?? <span style={{ color: "var(--amb)" }}>bill no. missing</span>}</> : e.vendor_name ? ` · ${e.vendor_name}` : ""}{e.vendor_gstin ? ` · GSTIN ✓` : ""}{e.bill_photo_key ? <> · <a href={`/api/files/${e.bill_photo_key}`} target="_blank">photo</a></> : ""}</div>
       {ed && <div className="grid two"><Field label="Vendor"><input value={ed.vendor_name ?? ""} onChange={(ev: any) => setEdit({ ...edit, [e.id]: { ...ed, vendor_name: ev.currentTarget.value } })} /></Field><Field label="Bill no."><input value={ed.bill_no ?? ""} onChange={(ev: any) => setEdit({ ...edit, [e.id]: { ...ed, bill_no: ev.currentTarget.value } })} /></Field><Field label="Vendor GSTIN"><input value={ed.vendor_gstin ?? ""} onChange={(ev: any) => setEdit({ ...edit, [e.id]: { ...ed, vendor_gstin: ev.currentTarget.value } })} /></Field><Field label="Category"><select value={ed.category} onChange={(ev: any) => setEdit({ ...edit, [e.id]: { ...ed, category: ev.currentTarget.value } })}>{refs.expense_families.map((fam) => <optgroup key={fam} label={fam}>{refs.expense_categories.filter((c) => c.family === fam && (c.petty || c.code === ed.category || e.account_kind === "bank")).map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</optgroup>)}</select></Field><div className="actions end"><Btn small onClick={() => { const n = { ...edit }; delete n[e.id]; setEdit(n); }}>Cancel</Btn><Btn small kind="primary" onClick={() => run(async () => { await patch(`/expenses/${e.id}`, ed); const n = { ...edit }; delete n[e.id]; setEdit(n); await q.reload(); }, "Updated · audited")}>Save</Btn></div></div>}

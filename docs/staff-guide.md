@@ -84,7 +84,7 @@ See money beyond a booking's balance, edit an approved booking's amount, see exp
 ### Expenses & petty cash
 - Every petty bill: **+** → Expense → amount → category → photo of the bill. Capture first; vendor and bill number can be filled later from the photo.
 - Pick the nearest category; "More…" has the full list. Marketing bills get a campaign name.
-- The petty cash book carries forward month to month. "Petty cash in hand today" must match the cash in the tin. If it does not, tell the owner the same day.
+- You see what you record (bills, top-ups received, cash deposited), not the balance AVOS expects you to hold. Count the petty cash tin and the cash drawer at the end of each week and send the counts to the revenue desk; they compare them with the books. The petty cash book with its opening and closing balance is on the revenue desk's and owner's screen.
 - Bank-paid bills (electricity, subscriptions, fees) are the owner's to record, not yours.
 
 ### Tasks

@@ -142,7 +142,9 @@ describe("Lead → CA", () => {
     // Deposit desk cash to bank, top up petty cash: transfers, never expenses.
     await ok("shaji", "POST", "/api/payments/transfers", { from_account_id: "acc_cash", to_account_id: "acc_bank", amount_paise: 1750000, reference: "CASH DEP" });
     await ok("shaji", "POST", "/api/payments/transfers", { from_account_id: "acc_bank", to_account_id: "acc_petty", amount_paise: 300000 });
-    const bal = await ok("sindhu", "GET", "/api/payments/accounts");
+    // Balances are for the revenue desk, the owner and the CA; the front desk counts the cash blind.
+    expect((await api("sindhu", "GET", "/api/payments/accounts")).status).toBe(403);
+    const bal = await ok("trupti", "GET", "/api/payments/accounts");
     const petty = bal.accounts.find((a: any) => a.id === "acc_petty");
     expect(petty.balance_paise).toBe(300000 - 120000);
     const cash = bal.accounts.find((a: any) => a.id === "acc_cash");
@@ -159,7 +161,10 @@ describe("Lead → CA", () => {
     // The petty cash book: each month opens with what the previous month closed at — the float is never reset.
     const period = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 7);
     const [y, m] = period.split("-").map(Number); const next = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}`;
-    const book = await ok("sindhu", "GET", `/api/expenses/petty-statement?period=${period}`);
+    const desk = await ok("sindhu", "GET", `/api/expenses/petty-statement?period=${period}`);
+    expect(desk).toMatchObject({ balances_hidden: true, topups_paise: 300000, spent_paise: 120000 });
+    expect(desk.opening_paise).toBeUndefined(); expect(desk.closing_paise).toBeUndefined(); expect(desk.received_paise).toBeUndefined();
+    const book = await ok("shaji", "GET", `/api/expenses/petty-statement?period=${period}`);
     expect(book.opening_paise).toBe(0);
     expect(book.topups_paise).toBe(300000);
     expect(book.spent_paise).toBe(120000);
