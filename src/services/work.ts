@@ -22,7 +22,7 @@ export const ESCALATE_TO: Record<string, string | null> = { sales: "revenue", pr
 
 /** Hours an item may wait before it is overdue. Start loose; tighten once the slip report shows what is normal. */
 export const TOLERANCE: Record<string, number> = {
-  inbox: 2, lead: 1, receipt: 24,
+  inbox: 2, lead: 1, receipt: 24, paidonline: 6,
   arrival: 4, departure: 4, overstay: 1, task: 24, unpaid: 24, refund: 48, gstslab: 24, airpay: 24,
   approval: 4, payout: 7 * 24, bank: 7 * 24,
   lock: 72, file: 72,
@@ -85,6 +85,16 @@ export async function allWorkItems(db: D1Database, p: PropertyRow, now = nowIso(
   for (const r of await all<any>(db, "SELECT id, received_at, parsed_json FROM inbox_items WHERE property_id = ? AND kind = 'payment' AND status = 'routed' ORDER BY received_at", p.id)) {
     const d = r.parsed_json ? JSON.parse(r.parsed_json) : {};
     out.push(item("receipt", `receipt:${r.id}`, `Airpay receipt ${d.order_id ?? ""} · ₹${((d.amount_paise ?? 0) / 100).toLocaleString("en-IN")} not matched to a stay`, d.payer_name ?? null, "property", r.received_at, "#pay", now));
+  }
+  // A website booking the guest paid online, whose Airpay receipt never reached the books (a mail filter that
+  // did not forward it, say). The booking email says what was paid; the payment is recorded from the receipt.
+  for (const r of await all<any>(db, `SELECT i.id, i.received_at, json_extract(i.parsed_json, '$.amount_paid_paise') AS paid_online, g.name,
+       COALESCE((SELECT SUM(CASE WHEN p.kind = 'refund' THEN -p.amount_paise ELSE p.amount_paise END) FROM payments p WHERE p.booking_id = b.id AND p.status != 'void'), 0) AS recorded
+     FROM inbox_items i JOIN bookings b ON b.id = i.booking_id JOIN guests g ON g.id = b.guest_id
+     WHERE i.property_id = ? AND i.source = 'bookingengine' AND i.kind = 'new_reservation' AND b.status NOT IN ('cancelled','no_show')
+       AND json_extract(i.parsed_json, '$.amount_paid_paise') > 0 ORDER BY i.received_at`, p.id)) {
+    if (r.recorded >= r.paid_online) continue;
+    out.push(item("paidonline", `paidonline:${r.id}`, `${r.name} paid ₹${(r.paid_online / 100).toLocaleString("en-IN")} online · not in the books`, "the Airpay receipt has not arrived: forward it to the AVOS inbox, or record the payment on Payments", "revenue", r.received_at, "#pay", now));
   }
   // Revenue: approvals, OTA payouts not settled, bank lines not reconciled.
   for (const r of await all<any>(db, "SELECT id, kind, summary, created_at FROM approvals WHERE property_id = ? AND status = 'pending' ORDER BY created_at", p.id))

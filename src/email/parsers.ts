@@ -1,7 +1,7 @@
 import { rupeesToPaise } from "../domain/money";
 import { parseLooseDate } from "../domain/dates";
 
-export const PARSER_VERSION = "2026-10-26a";
+export const PARSER_VERSION = "2026-10-27a";
 
 /** "Villa", "Entire villa", "Whole villa", "Full villa": the booking engine's name for all rooms together. */
 export const isWholeVilla = (roomName: unknown) => /^(the\s+)?(entire|whole|full|complete|exclusive)?\s*villa\b/i.test(String(roomName ?? "").trim());
@@ -170,7 +170,9 @@ export function parseBookingEngine(subject: string, body: string, year: number):
   const roomsBlock = body.match(/\n\s*Rooms\s*\n([\s\S]*?)\n\s*Sub\s*Total/i)?.[1] ?? "";
   const roomLines = roomsBlock.split(/\n|(?=INR\s*[\d,]+)/).map((l) => l.replace(/^\s*INR\s*[\d,]+\.?\d*\s*/i, "").trim()).filter((l) => l && !/^INR/i.test(l) && !/^[\d,.\s]+$/.test(l));
   const roomName = roomLines[0] ?? grab(body, /Thank you for booking with us\.?\s*\n?\s*([A-Za-z][^\n-]{2,40}?)\s*-\s*\n/i);
-  const total = grab(body, /\n\s*Total\s*\n?\s*INR\s*([\d,]+\.?\d*)/i);
+  // Each room line carries its own "Total"; the booking's total is the last one, after "Sub Total".
+  const totals = [...body.matchAll(/\n\s*Total\s*\n?\s*INR\s*([\d,]+\.?\d*)/gi)];
+  const total = totals.length ? clean(totals[totals.length - 1][1]) : null;
   const paid = grab(body, /Amount Paid\s*\n?\s*INR\s*([\d,]+\.?\d*)/i);
   const data = {
     channel: "Direct", collection_type: "direct", vendor: "booking engine", status_text: status || null,

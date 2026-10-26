@@ -196,6 +196,28 @@ describe("STAAH booking engine (website) confirmations", () => {
     expect((await sql("SELECT room_id FROM room_nights WHERE booking_id = ?", ing.booking_id))[0].room_id).toBe("loc_r2");
   });
 
+  it("two rooms in one confirmation: the booking total is the grand total, not the first room's line", async () => {
+    // Each room line carries its own "Total"; the booking's Total comes last, after Sub Total.
+    const two = html("179000000000777", "Two Rooms Guest", "Premium Lawn View", "21 Dec 2027", "22 Dec 2027", "5,292.00", "10,584.00")
+      .replace('<tr><td>Cancellation Policy', '<tr><td>Two Rooms Guest &middot; 2 adults</td></tr><tr><td>21 Dec 2027</td></tr><tr><td>INR 5,292.00</td></tr><tr><td>Total</td></tr><tr><td>INR 5,292.00</td></tr><tr><td>Cancellation Policy')
+      .replace('<tr><td>Rooms</td></tr><tr><td>Premium Lawn View</td></tr><tr><td>INR 5,292.00</td></tr><tr><td>Sub Total</td></tr><tr><td>INR 5,292.00</td></tr><tr><td>Total</td></tr><tr><td>INR 5,292.00</td></tr>',
+        '<tr><td>Rooms</td></tr><tr><td>Premium Lawn View</td></tr><tr><td>INR 5,292.00</td></tr><tr><td>Premium Lawn View</td></tr><tr><td>INR 5,292.00</td></tr><tr><td>Sub Total</td></tr><tr><td>INR 10,584.00</td></tr><tr><td>Total</td></tr><tr><td>INR 10,584.00</td></tr>');
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@mybookingsite.io", subject: "(Confirmed) Two Rooms Guest Reservation No:179000000000777-The Meadows Varkala", html: two });
+    expect(ing.parsed.data).toMatchObject({ rooms: 2, total_incl_gst_paise: 1058400, amount_paid_paise: 1058400 });
+    // Only one Premium room exists, so the second cannot be booked on its own: the card waits with the reason.
+    expect(ing.status).toBe("pending"); expect(ing.auto.note).toMatch(/only 1 of 2/);
+    // Booked by hand from the card; the guest paid online but no Airpay receipt has come: the revenue desk is told.
+    const bk = await ok("prachi", "POST", "/api/bookings", { guest_name: "Two Rooms Guest", guest_phone: "9560000001", channel_code: "direct", external_ref: "179000000000777", inbox_item_id: ing.id, check_in: "2027-12-21", check_out: "2027-12-22", rooms: [{ room_id: "loc_r1", nightly_rate_paise: 504000 }, { room_id: "loc_r2", nightly_rate_paise: 504000 }] });
+    const work = await ok("trupti", "GET", "/api/work?all=1");
+    const items = (work.items ?? work.mine ?? []) as any[];
+    const flag = items.find((w) => w.key === `paidonline:${ing.id}`);
+    expect(flag?.title).toMatch(/paid ₹10,584 online/);
+    // The receipt arrives (Airpay order ids begin with the reservation number): the payment is recorded and the flag clears.
+    await ok("trupti", "POST", "/api/payments", { booking_id: bk.booking.id, method: "airpay", amount_paise: 1058400, reference: "1790000000007770000001" });
+    const after = await ok("trupti", "GET", "/api/work?all=1");
+    expect(((after.items ?? after.mine ?? []) as any[]).some((w) => w.key === `paidonline:${ing.id}`)).toBe(false);
+  });
+
   it("a room type AVOS does not know waits for a person, and 'book by hand' from Reservations closes the card", async () => {
     const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@mybookingsite.io", subject: "(Confirmed) Test Test Reservation No:1060900000105133-The Meadows Varkala", html: html("1060900000105133", "Test Test", "Garden Cottage", "20 Mar 2027", "21 Mar 2027", "1.00") });
     expect(ing.status).toBe("pending");
