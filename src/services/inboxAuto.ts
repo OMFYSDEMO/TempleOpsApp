@@ -77,22 +77,35 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
       const channel = await resolveChannel(db, property.id, parsed);
       if (!channel) return { applied: false, note: `channel "${d.channel ?? "?"}" is not set up: pick it by hand or add it under Settings` };
       const villa = isWholeVilla(d.room_name);
-      const free = await freeRoomsOfType(db, property.id, d.room_name, checkIn, checkOut);
-      if (!free.typeKnown) return { applied: false, note: `room type "${d.room_name ?? "?"}" does not match a room: pick the room(s) by hand` };
       const roomCount = (await all<{ n: number }>(db, "SELECT COUNT(*) AS n FROM locations WHERE property_id = ? AND kind = 'room' AND active = 1", property.id))[0]?.n ?? 0;
-      const wanted = villa ? roomCount : Math.max(1, Number(d.rooms ?? 1));
-      if (free.ids.length < wanted) return { applied: false, note: villa ? `whole villa booked but only ${free.ids.length} of ${wanted} rooms are free for those dates: pick by hand or move the other stay` : `only ${free.ids.length} of ${wanted} ${d.room_name} room(s) free for those dates: possible overbooking, pick by hand` };
-      const roomIds = free.ids.slice(0, wanted);
+      // One entry per room type the email lists (STAAH repeats a block per type); a single type is the old shape.
+      const types: { name: unknown; count: number; amount_paise: number | null }[] = Array.isArray(d.room_types) && d.room_types.length > 1
+        ? d.room_types.map((t: any) => ({ name: t.name, count: Math.max(1, Number(t.count ?? 1)), amount_paise: t.amount_paise ?? null }))
+        : [{ name: d.room_name, count: villa ? roomCount : Math.max(1, Number(d.rooms ?? 1)), amount_paise: null }];
+      const picked: { roomId: string; share: number | null }[] = [];
+      for (const t of types) {
+        const free = await freeRoomsOfType(db, property.id, t.name, checkIn, checkOut);
+        if (!free.typeKnown) return { applied: false, note: `room type "${t.name ?? "?"}" does not match a room: pick the room(s) by hand` };
+        const open = free.ids.filter((id) => !picked.some((p) => p.roomId === id));
+        if (open.length < t.count) return { applied: false, note: villa && types.length === 1 ? `whole villa booked but only ${open.length} of ${t.count} rooms are free for those dates: pick by hand or move the other stay` : `only ${open.length} of ${t.count} ${t.name} room(s) free for those dates: possible overbooking, pick by hand` };
+        for (const roomId of open.slice(0, t.count)) picked.push({ roomId, share: t.amount_paise === null ? null : t.amount_paise / t.count });
+      }
+      const roomIds = picked.map((p) => p.roomId);
       const nights = Math.max(1, Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86_400_000));
       let nightly: number;
       if (d.nightly_rate_paise) nightly = Number(d.nightly_rate_paise);
       else if (d.room_total_paise) nightly = Math.round(Number(d.room_total_paise) / (nights * roomIds.length));
       else if (d.total_incl_gst_paise) { const perNight = Math.round(Number(d.total_incl_gst_paise) / (nights * roomIds.length)); nightly = splitInclusive(perNight, slabBpForRoomNight(gstPolicy(property), perNight)).ex; }
       else return { applied: false, note: "the email carried no amount" };
+      // Each room's own price when the email gives one per room type: its share of Room Total, so the booking adds up
+      // to the email whether the nightly amounts were printed with GST or without.
+      const shares = picked.every((p) => p.share !== null) && picked.length > 1 && d.room_total_paise ? picked.map((p) => p.share as number) : null;
+      const sumShares = shares ? shares.reduce((a, b) => a + b, 0) : 0;
+      const rates = roomIds.map((_, i) => shares && sumShares > 0 ? Math.round((Number(d.room_total_paise) * shares[i]) / sumShares / nights) : nightly);
       const result = await createBooking(db, actor, property, {
         guest: { name: String(d.guest_name), phone: d.guest_phone ?? null, email: d.guest_email ?? null },
-        channelCode: channel.code, externalRef: item.external_ref, checkIn, checkOut, rooms: roomIds.map((roomId) => ({ roomId, nightlyRatePaise: nightly })),
-        inboxItemId: item.id, isOta: channel.code !== "direct", notes: `auto-booked from ${item.source} email: ${item.subject}`,
+        channelCode: channel.code, externalRef: item.external_ref, checkIn, checkOut, rooms: roomIds.map((roomId, i) => ({ roomId, nightlyRatePaise: rates[i] })),
+        inboxItemId: item.id, isOta: channel.code !== "direct", adults: d.adults ?? undefined, children: d.children ?? undefined, notes: `auto-booked from ${item.source} email: ${item.subject}`,
       });
       const b = new Batch(db, actor);
       b.add("UPDATE inbox_items SET status = 'approved', booking_id = ?, auto_applied = 1, auto_note = NULL, reviewed_at = ? WHERE id = ?", result.id, nowIso(), item.id);

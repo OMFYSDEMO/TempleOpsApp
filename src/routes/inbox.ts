@@ -64,11 +64,15 @@ r.get("/", async (c) => {
         holders[t.room_id] = who ? `${who.name}${who.status === "provisional" ? " (awaiting approval)" : who.status === "hold" ? " (on hold)" : ""}` : "another booking";
       }
       const villa = isWholeVilla(d.room_name);
-      const want = String(d.room_name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-      const ofType = (r: { name: string }) => { if (villa) return true; const n = r.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); return !!want && (n === want || want.startsWith(n) || n.startsWith(want)); };
-      room_options = rooms.map((r) => ({ id: r.id, name: r.name, free: !holders[r.id], taken_by: holders[r.id] ?? null, matches_type: ofType(r) }));
-      const wanted = villa ? rooms.length : Math.max(1, Number(d.rooms ?? 1));
-      suggested_room_ids = rooms.filter((r) => ofType(r) && !holders[r.id]).slice(0, wanted).map((r) => r.id);
+      const norm = (v: unknown) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      // Every room type the email lists, each with how many rooms of it (a STAAH email repeats a block per type).
+      const types: { want: string; count: number }[] = Array.isArray(d.room_types) && d.room_types.length > 1
+        ? d.room_types.map((t: any) => ({ want: norm(t.name), count: Math.max(1, Number(t.count ?? 1)) }))
+        : [{ want: norm(d.room_name), count: villa ? rooms.length : Math.max(1, Number(d.rooms ?? 1)) }];
+      const isType = (r: { name: string }, want: string) => { if (villa) return true; const n = norm(r.name); return !!want && (n === want || want.startsWith(n) || n.startsWith(want)); };
+      room_options = rooms.map((r) => ({ id: r.id, name: r.name, free: !holders[r.id], taken_by: holders[r.id] ?? null, matches_type: types.some((t) => isType(r, t.want)) }));
+      for (const t of types) suggested_room_ids.push(...rooms.filter((r) => isType(r, t.want) && !holders[r.id] && !suggested_room_ids.includes(r.id)).slice(0, t.count).map((r) => r.id));
+      const wanted = types.reduce((n, t) => n + t.count, 0);
       nightly_rate_paise = impliedNightly(p, d, wanted);
     }
     // A modification is applied by amending the booking it refers to, never by booking again.

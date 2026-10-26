@@ -111,6 +111,33 @@ describe("Inbox automation", () => {
     expect(re.status).toBe("pending"); expect(re.parsed.source).toBe("unknown");
   });
 
+  it("books every room type of a multi-room STAAH email, each at its own price", async () => {
+    // Booking.com through STAAH: one block per room type, nightly amounts printed with GST, one Room Total ex-GST.
+    const block = (room: string, adults: number, n1: string, n2: string, tax: string) => `ROOM TYPE\n${room}\nNO OF ROOMS\n1\nCHECK-IN\n15 Mar 2027\tCHECK-OUT\n17 Mar 2027\tNO OF NIGHTS\n2\nDATE\n15 Mar 2027\tGUEST NAME\nMulti Room Guest\tADULTS\n${adults}\tCHILDREN\n0\tBEDDING\n--\tAMOUNT\nINR${n1}\n16 Mar 2027\tMulti Room Guest\t${adults}\t0\t--\tINR${n2}\nAdd ons\nName\nParking service (Included)\tRate\nQuantity\nNights\n\nINR0.00\nTaxes\nGoods & services tax\tINR${tax}\n\nSpecial Request\n\nsmoking preference :: Non-Smoking\n\nCancellation Policy\n\nThe guest can cancel free of charge until 7 days before arrival.\n`;
+    const text = `Reservation Confirmation\nChannel Name: Booking.com\nBookings Status: Confirmed\nBooking Id#: 7000000000009901 (5600000001)\nBooking Details\n\nHOTEL\nThe Meadows Varkala\n\nBOOKING REFERENCE\n7000000000009901 (5600000001)\n`
+      + block("Superior - Deluxe Double Room with Balcony - Standard Rate", 3, "17,390.25", "17,390.25", "5,305.50")
+      + block("Deluxe - Double Room with Balcony - Standard Rate", 2, "13,706.44", "13,706.45", "4,181.63")
+      + `\nAdditional Information:\n\n** THIS RESERVATION HAS BEEN PRE-PAID **\n\nPayment Type: Channel Collect\nCommission : INR 9,486.26\nRoom Total : INR 52,706.26\nTotal Taxes : INR 9,487.13\nTotal (All Inclusive): INR 62,193.39`;
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@staah.com", subject: "New Reservation Booking.com for Guest Reservation No:5600000001 (7000000000009901) - The Meadows Varkala", text });
+    expect(ing.parsed.data.room_types.map((t: any) => [t.name, t.count])).toEqual([["Superior", 1], ["Deluxe", 1]]);
+    expect(ing.parsed.data).toMatchObject({ rooms: 2, adults: 5, room_total_paise: 5270626, total_incl_gst_paise: 6219339 });
+    expect(ing.status).toBe("approved"); expect(ing.auto.what).toBe("booked");
+    const rooms = await sql("SELECT room_id, nightly_rate_paise, room_total_paise FROM booking_rooms WHERE booking_id = ? ORDER BY room_id", ing.booking_id);
+    expect(rooms).toEqual([
+      { room_id: "loc_r1", nightly_rate_paise: 1161563, room_total_paise: 2323126 },
+      { room_id: "loc_r3", nightly_rate_paise: 1473750, room_total_paise: 2947500 },
+    ]);
+    // The two rooms add up to the email's Room Total to the paisa (GST follows from the property's GSTIN).
+    const bk = (await sql("SELECT room_total_paise, adults FROM bookings WHERE id = ?", ing.booking_id))[0];
+    expect(bk).toEqual({ room_total_paise: 5270626, adults: 5 });
+    expect((await sql("SELECT COUNT(*) AS n FROM room_nights WHERE booking_id = ?", ing.booking_id))[0].n).toBe(4);
+
+    // Same two types again for the same nights: Superior is taken, so nothing books on its own and the card waits.
+    const again = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@staah.com", subject: "New Reservation Booking.com for Other Reservation No:5600000002 (7000000000009902) - The Meadows Varkala", text: text.replace(/7000000000009901 \(5600000001\)/g, "7000000000009902 (5600000002)") });
+    expect(again.parsed.data.room_types).toHaveLength(2);
+    expect(again.status).toBe("pending"); expect(again.auto.note).toMatch(/Superior/);
+  });
+
   it("matches a cancellation to a stay that carries the migrated 'STAAH id (OTA ref)' reference", async () => {
     const r = await ok("prachi", "POST", "/api/bookings", { guest_name: "Migrated Guest", guest_phone: "9222222222", channel_code: "agoda", external_ref: "1060900000001308 (2049201329)", check_in: "2027-02-10", check_out: "2027-02-11", rooms: [{ room_id: "loc_r4", nightly_rate_paise: 500000 }] });
     const canc = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@staah.com", subject: "Cancelled Reservation Agoda for Migrated Reservation No:2049201329 (1060900000001308) - The Meadows Varkala", text: "Channel Name: Agoda\nBookings Status: Cancelled\nBooking Id#: 1060900000001308 (2049201329)\nGUEST NAME\nMigrated Guest\nCHECK-IN\n10 Feb 2027\nCHECK-OUT\n11 Feb 2027" });

@@ -1,7 +1,7 @@
 import { rupeesToPaise } from "../domain/money";
 import { parseLooseDate } from "../domain/dates";
 
-export const PARSER_VERSION = "2026-10-21c";
+export const PARSER_VERSION = "2026-10-26a";
 
 /** "Villa", "Entire villa", "Whole villa", "Full villa": the booking engine's name for all rooms together. */
 export const isWholeVilla = (roomName: unknown) => /^(the\s+)?(entire|whole|full|complete|exclusive)?\s*villa\b/i.test(String(roomName ?? "").trim());
@@ -46,6 +46,34 @@ function money(body: string, label: string): string | null {
 
 const DATE = "[0-9]{1,2}[\\/-][0-9]{1,2}[\\/-][0-9]{2,4}|[0-9]{4}-[0-9]{2}-[0-9]{2}|\\d{1,2} [A-Za-z]{3,}(?: \\d{4})?";
 
+export interface StaahRoom { name: string; full: string; count: number; adults: number | null; children: number | null; amount_paise: number | null }
+
+/**
+ * The rooms a STAAH email books. The table repeats one block per room type (ROOM TYPE, NO OF ROOMS, the dates, then a
+ * row per night ending in its AMOUNT, then add-ons and taxes), so a Superior + Deluxe booking carries two blocks.
+ * amount_paise is the sum of that block's nightly amounts: inclusive of GST on Booking.com, ex-GST on Goibibo, so it
+ * is used only as each room's share of the email's Room Total.
+ */
+export function staahRooms(body: string): StaahRoom[] {
+  const starts = [...body.matchAll(/^[ \t]*ROOM TYPE\b/gim)].map((m) => m.index!);
+  if (!starts.length) return [];
+  const tail = body.search(/Additional Information|Payment Type\s*:|Room Total\s*:/i);
+  return starts.map((start, i) => {
+    const stop = i + 1 < starts.length ? starts[i + 1] : tail > start ? tail : body.length;
+    const block = body.slice(start, stop);
+    const full = grab(block, /ROOM TYPE\s*\n?\s*([^\n]+)/i) ?? "";
+    const nightsPart = block.slice(Math.max(0, block.search(/\bDATE\b/)), (() => { const k = block.search(/Add ons|\bTaxes\b|Special Request|Cancellation Policy/i); return k > 0 ? k : block.length; })());
+    const amounts = [...nightsPart.matchAll(/(?:\bINR|₹|\bRs\.?)\s*([\d,]+(?:\.\d+)?)/gi)].map((m) => rupeesToPaise(m[1]));
+    return {
+      name: full.split(/\s+-\s+|\s*\(/)[0].trim(), full,
+      count: Number(grab(block, /NO\.? OF ROOMS\s*\n?\s*(\d+)/i) ?? "1") || 1,
+      adults: Number(grab(block, /ADULTS\s*\n?\s*(\d+)/i) ?? "") || null,
+      children: ((c) => c === null ? null : Number(c))(grab(block, /CHILDREN\s*\n?\s*(\d+)/i)),
+      amount_paise: amounts.length ? amounts.reduce((a, b) => a + b, 0) : null,
+    };
+  }).filter((r) => r.name);
+}
+
 /**
  * STAAH channel-manager notification ("New Reservation Goibibo for kumar Reservation No:0190589681 (1060900000001400)").
  * The body is a label-above-value table: CHANNEL NAME, BOOKING ID# <ota ref> (<staah ref>), ROOM TYPE, NO OF ROOMS,
@@ -69,7 +97,9 @@ export function parseStaah(rawSubject: string, body: string, year: number): Pars
   const guest = grab(body, /GUEST NAME\s*\n?\s*([^\n]+)/i) ?? grab(body, /CONTACT NAME\s*\n?\s*([^\n]+)/i) ?? grab(body, /Guest(?: Name)?\s*:?\s*([^\n·]+?)(?:\s*·|\n|$)/i) ?? grab(subject, /for\s+(.+?)\s+Reservation\s*No/i);
   const roomFull = grab(body, /ROOM TYPE\s*\n?\s*([^\n]+)/i) ?? grab(body, /Room(?: Type)?\s*:?\s*([A-Za-z][A-Za-z ]*?)\s*(?:×|x|\n|·)/i);
   const room = roomFull ? roomFull.split(/\s+-\s+|\s*\(/)[0].trim() : null;
-  const roomsN = Number(grab(body, /NO\.? OF ROOMS\s*\n?\s*(\d+)/i) ?? grab(body, /(?:×|x)\s*(\d+)/) ?? "1");
+  const roomTypes = staahRooms(body);
+  const roomsN = roomTypes.length > 1 ? roomTypes.reduce((n, r) => n + r.count, 0) : Number(grab(body, /NO\.? OF ROOMS\s*\n?\s*(\d+)/i) ?? grab(body, /(?:×|x)\s*(\d+)/) ?? "1");
+  const sumOf = (k: "adults" | "children") => roomTypes.every((r) => r[k] !== null) ? roomTypes.reduce((n, r) => n + (r[k] ?? 0), 0) : null;
   const nightsN = Number(grab(body, /NO\.? OF NIGHTS\s*\n?\s*(\d+)/i) ?? "0") || null;
   const ci = grab(body, new RegExp("Check[- ]?in\\s*:?\\s*(" + DATE + ")", "i"));
   const co = grab(body, new RegExp("Check[- ]?out\\s*:?\\s*(" + DATE + ")", "i"));
@@ -86,7 +116,10 @@ export function parseStaah(rawSubject: string, body: string, year: number): Pars
   const collect = /channel collect|prepaid|paid online|virtual card/i.test(body) ? "channel_collect" : /hotel collect|pay at (?:hotel|property)/i.test(body) ? "hotel_collect" : null;
   const data = {
     channel, ota_ref: otaRef, vendor: grab(body, /VendorName\s*::?\s*([A-Za-z.\- ]+?)\s*(?:,|\n|$)/i), guest_name: guest, room_name: room, room_name_full: roomFull, rooms: roomsN, nights: nightsN,
-    adults: Number(grab(body, /ADULTS\s*\n?\s*(\d+)/i) ?? "0") || null, children: Number(grab(body, /CHILDREN\s*\n?\s*(\d+)/i) ?? "0") || null,
+    // Several room types: every one is listed, with its count and its share of the price.
+    room_types: roomTypes.length > 1 ? roomTypes : undefined,
+    adults: (roomTypes.length > 1 ? sumOf("adults") : null) ?? (Number(grab(body, /ADULTS\s*\n?\s*(\d+)/i) ?? "0") || null),
+    children: (roomTypes.length > 1 ? sumOf("children") || null : null) ?? (Number(grab(body, /CHILDREN\s*\n?\s*(\d+)/i) ?? "0") || null),
     check_in: checkIn, check_out: checkOut,
     room_total_paise: roomTotal ? rupeesToPaise(roomTotal) : null, room_total_is_ex_gst: taxes !== null || /ex[- ]?GST|excl/i.test(body),
     taxes_paise: taxes ? rupeesToPaise(taxes) : null, total_incl_gst_paise: totalIncl ? rupeesToPaise(totalIncl) : null,
