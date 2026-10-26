@@ -148,7 +148,13 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
       // Airpay order ids begin with the SwiftBook itinerary number: that is the stay the money is for.
       const bk = await all<{ id: string; guest_name: string }>(db, "SELECT b.id, g.name AS guest_name FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.external_ref IS NOT NULL AND ? LIKE b.external_ref || '%' AND b.status NOT IN ('cancelled','no_show') ORDER BY b.created_at DESC", property.id, String(d.order_id));
       if (bk.length !== 1) return { applied: false, note: bk.length ? "order matches more than one stay" : "no stay matches the order id: confirm or dismiss on the Payments screen" };
-      const pay = await recordPayment(db, actor, property, { booking_id: bk[0].id, method: "airpay", amount_paise: Number(d.amount_paise), reference: String(d.order_id), inbox_item_id: item.id, idempotency_key: `airpay:${d.order_id}` });
+      // Dated the day the guest paid: the receipt's own send time (a forward carries it), else when the email arrived.
+      const arrived = await one<{ received_at: string }>(db, "SELECT received_at FROM inbox_items WHERE id = ?", item.id);
+      const paidAt = Date.parse(String(d.sent_at ?? arrived?.received_at ?? ""));
+      const today = todayIn(property.timezone);
+      const paidOn = Number.isFinite(paidAt) ? todayIn(property.timezone, new Date(paidAt)) : today;
+      const receivedOn = paidOn <= today && paidOn >= addDays(today, -60) ? paidOn : today;
+      const pay = await recordPayment(db, actor, property, { booking_id: bk[0].id, method: "airpay", amount_paise: Number(d.amount_paise), reference: String(d.order_id), received_on: receivedOn, inbox_item_id: item.id, idempotency_key: `airpay:${d.order_id}` });
       const b = new Batch(db, actor);
       b.add("UPDATE inbox_items SET auto_applied = 1, auto_note = NULL WHERE id = ?", item.id);
       b.audit("inbox.auto_pay", "inbox_item", item.id, { status: "routed" }, { status: "approved", payment_id: pay.id, booking_id: bk[0].id });

@@ -229,6 +229,17 @@ export function parseAirpay(subject: string, body: string): ParsedEmail {
   return { source: "airpay", kind: "payment", external_ref: order, data, confidence: order && data.amount_paise && success ? "high" : "low" };
 }
 
+/**
+ * When the notification itself was sent, from the header block a forward carries ("Date: Mon, 26 Oct 2026 14:02:05
+ * +0530", Gmail's "Date: Sun, 25 Oct 2026 at 13:26"). A receipt forwarded a day late is still dated the day it was paid.
+ */
+export function forwardedSentAt(whole: string): string | null {
+  const m = whole.match(/Forwarded message[^\n]*\n[\s\S]{0,800}?\bDate\s*:\s*([^\n]+)/i);
+  if (!m) return null;
+  const t = Date.parse(m[1].replace(/\s+at\s+/i, " ").replace(/\s*\(.*\)\s*$/, "").trim());
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
 export function parseInboundEmail(from: string, rawSubject: string, html?: string, text?: string, now = new Date()): ParsedEmail {
   const whole = textOf(html, text);
   const body = forwardedPart(whole);          // a forwarded notification is read past the forwarder's signature
@@ -246,6 +257,6 @@ export function parseInboundEmail(from: string, rawSubject: string, html?: strin
   if (looksEngine) return parseBookingEngine(subject, body, year);
   if (looksStaah) return parseStaah(subject, body, year);
   if (looksSwiftbook) return parseSwiftbook(subject, body, year);
-  if (looksAirpay) return parseAirpay(subject, body);
+  if (looksAirpay) { const r = parseAirpay(subject, body); const sent = forwardedSentAt(whole); if (sent) r.data.sent_at = sent; return r; }
   return { source: "unknown", kind: "unknown", external_ref: null, data: { preview: body.slice(0, 500) }, confidence: "low" };
 }

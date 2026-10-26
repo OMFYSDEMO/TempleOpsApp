@@ -91,6 +91,18 @@ describe("Inbox automation", () => {
     expect((await sql("SELECT COUNT(*) AS n FROM payments WHERE booking_id = ? AND status != 'void'", bk.booking.id))[0].n).toBe(1);
   });
 
+  it("dates an Airpay payment the day the receipt was sent, even when it is forwarded later", async () => {
+    // Booked by hand with the website reservation number; Airpay's order id is that number.
+    const bk = await ok("shaji", "POST", "/api/bookings", { guest_name: "Late Forward Guest", guest_phone: "9500000078", channel_code: "direct", external_ref: "179000000000888", check_in: "2027-07-01", check_out: "2027-07-02", rooms: [{ room_id: "loc_r3", nightly_rate_paise: 500000 }] });
+    const sent = new Date(Date.now() - 2 * 86_400_000); // two days ago
+    const day = new Date(sent.getTime() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+    const receipt = `Kind Regards,\nThe Meadows | Varkala\n============ Forwarded message ============\nFrom: Airpay <noreply@airpay.co.in>\nTo: <bookings@meadowsvarkala.com>\nDate: ${sent.toUTCString()}\nSubject: Congratulations! Order ID 179000000000888 Transaction is Successful\n============ Forwarded message ============\nINR 5250.00\nCollected Successfully\nOrder ID\n179000000000888\nCustomer Name\nLATE FORWARD GUEST\nOrder Amount\nINR 5250.00\nAirpay Id\n2099999002\nhttps://nps.airpay.co.in/view.php?id=2`;
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "bookings@meadowsvarkala.com", subject: "Fwd: Congratulations! Order ID 179000000000888 Transaction is Successful", text: receipt });
+    expect(ing.auto.what).toBe("paid");
+    const pay = (await sql("SELECT received_on, amount_paise FROM payments WHERE booking_id = ?", bk.booking.id))[0];
+    expect(pay).toEqual({ received_on: day, amount_paise: 525000 });
+  });
+
   it("reads a Gmail-forwarded STAAH notification in the real label-above-value layout and books it", async () => {
     // The forwarder's signature comes first; the STAAH sender and the table follow the "Forwarded message" marker.
     const text = `Kind Regards,\n\nShaji Anandan\nDirector - Sales & Marketing\nThe Meadows | Varkala\nGST - 32AARCM3606J1ZD\n\n============ Forwarded message ============\nFrom:  <noreply@staah.com>\nTo: <bookings@meadowsvarkala.com>\nDate: Mon, 19 Oct 2026 19:46:18 +0100\nSubject: New Reservation Goibibo for kumar Reservation No:0190589681 (1060900000001400) - The Meadows Varkala\n============ Forwarded message ============\nReservation Confirmation\nChannel Name: Goibibo\nBookings Status: Confirmed\nBooking Id#: 1060900000001400 (0190589681)\nGuest Details\nCONTACT NAME\nsaurav kumar\nCONTACT NUMBER\nALTERNATIVE NUMBER\nEMAIL\nBooking Details\nHOTEL\nThe Meadows Varkala\nBOOKING REFERENCE\n1060900000001400 (0190589681)\nADDRESS\n133/B, Marakkadamukku, Palachira PO.\nROOM TYPE\nPremium - Premium Room_CP\nNO OF ROOMS\n1\nCHECK-IN\n20 Jan 2027\nCHECK-OUT\n22 Jan 2027\nNO OF NIGHTS\n2\nDATE\n20 Jan 2027\nGUEST NAME\nsaurav kumar\nADULTS\n2\nCHILDREN\n1\nBEDDING\n--\nAMOUNT\nINR5,852.25\n21 Jan 2027\nsaurav kumar\n2\n1\n--\nINR5,852.25\n(Age of child 1:3)\nAdditional Information:\nChannel collect, Inclusions : Breakfast included , VendorName:: MakeMyTrip, Vendor BookingId:: NH7201234,\nPayment Type: Channel Collect\nCommission : INR 2,437.29\nRoom Total : INR 11,704.50\nTotal Taxes : INR 688.50\nTotal (All Inclusive): INR 12,393.00`;
