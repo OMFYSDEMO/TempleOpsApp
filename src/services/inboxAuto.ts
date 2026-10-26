@@ -23,6 +23,8 @@ import { addDays } from "../domain/dates";
  *  - modification     → always a person: the email rarely says what changed
  */
 /** A booking reference matches as stored, or as the "STAAH id (OTA ref)" pair the migrated stays carry. */
+/** Note on a cancellation that arrives for a stay already checked out; such cards belong to the revenue desk. */
+export const AFTER_STAY = "OTA cancelled after the stay was checked out";
 export const REF_MATCH = "(external_ref = ? OR external_ref LIKE ? OR external_ref LIKE ?)";
 export const refArgs = (ref: string) => [ref, `${ref} (%`, `% (${ref})`];
 
@@ -103,6 +105,11 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
     if (item.kind === "cancellation") {
       if (!item.external_ref) return { applied: false, note: "no booking reference in the email" };
       const open = await all<{ id: string; status: string; guest_id: string }>(db, `SELECT id, status, guest_id FROM bookings WHERE property_id = ? AND ${REF_MATCH} AND status NOT IN ('cancelled','no_show','checked_out')`, property.id, ...refArgs(item.external_ref));
+      if (!open.length) {
+        // Cancelled after the stay was completed: the revenue desk must check with the OTA before the payout is counted on.
+        const done = await one<{ name: string; check_in: string; check_out: string }>(db, `SELECT g.name, b.check_in, b.check_out FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND ${REF_MATCH} AND b.status = 'checked_out' ORDER BY b.created_at DESC LIMIT 1`, property.id, ...refArgs(String(item.external_ref)));
+        if (done) return { applied: false, note: `${AFTER_STAY} (${done.name}, ${done.check_in} → ${done.check_out}): check with the OTA whether the stay will be paid, then dismiss` };
+      }
       if (open.length !== 1) return { applied: false, note: open.length ? "more than one open booking carries that reference" : `no open booking with reference ${item.external_ref}` };
       if (open[0].status === "checked_in") return { applied: false, note: "guest is checked in: a person decides" };
       const res = await cancelBooking(db, actor, property, open[0].id, "cancelled", `${item.source} cancellation email`);

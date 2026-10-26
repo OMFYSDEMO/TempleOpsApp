@@ -248,7 +248,7 @@ describe("Lead → CA", () => {
   it("GST registration flips the invoice: slab per room-night, threshold inclusive", async () => {
     await ok("shaji", "PATCH", "/api/admin/property", { gstin: "32AAACX1234A1Z5" });
     const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Peak Guest", guest_phone: "9222222222", check_in: "2026-12-27", check_out: "2026-12-28", rooms: [{ room_id: "loc_r2", nightly_rate_paise: 750000 }, { room_id: "loc_r1", nightly_rate_paise: 790000 }] });
-    // Premium at exactly ₹7,500 → 5%; Deluxe sold above its ₹7,000 peak tariff → above-tariff (manual approval) and slab decided by the declared tariff (5%).
+    // Premium at exactly ₹7,500 → 5%; Deluxe sold above its ₹7,000 peak tariff → above-tariff (manual approval) and slab decided by the price charged.
     const lines = b.booking.lines;
     expect(lines.find((l: any) => l.roomId === "loc_r2").gstRateBp).toBe(500);
     expect(lines.find((l: any) => l.roomId === "loc_r1").rateVsTariff).toBe("above");

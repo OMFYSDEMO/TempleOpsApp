@@ -46,7 +46,7 @@ describe("dates", () => {
 describe("gst", () => {
   const registered: GstPolicy = { gstin: "32AAACX1234A1Z5", nilUptoPaise: 100000, thresholdPaise: 750000, belowBp: 500, aboveBp: 1800 };
   const unregistered: GstPolicy = { ...registered, gstin: null };
-  it("slab is per room-night on declared tariff, threshold inclusive", () => {
+  it("slab is per room-night, threshold inclusive", () => {
     expect(slabBpForRoomNight(registered, 750000)).toBe(500);
     expect(slabBpForRoomNight(registered, 750001)).toBe(1800);
     expect(slabBpForRoomNight(registered, 600000)).toBe(500);
@@ -64,10 +64,15 @@ describe("gst", () => {
     expect(l.gstPaise).toBe(0);
     expect(l.grossPaise).toBe(1500000);
   });
-  it("slab follows the declared tariff even when a discount is sold", () => {
-    const l = computeRoomLine(registered, { roomId: "r", nights: 1, nightlyRatePaise: 700000, declaredTariffPaise: 800000 });
-    expect(l.gstRateBp).toBe(1800);
-    expect(l.gstPaise).toBe(126000);
+  it("slab follows the price charged per night, not the rate card", () => {
+    // Discounted below ₹7,500 from an ₹8,000 card: 5% on what was charged.
+    const down = computeRoomLine(registered, { roomId: "r", nights: 1, nightlyRatePaise: 700000, declaredTariffPaise: 800000 });
+    expect(down.gstRateBp).toBe(500);
+    expect(down.gstPaise).toBe(35000);
+    // Sold above ₹7,500 from a ₹7,000 card (peak, OTA price): 18%.
+    const up = computeRoomLine(registered, { roomId: "r", nights: 1, nightlyRatePaise: 800000, declaredTariffPaise: 700000 });
+    expect(up.gstRateBp).toBe(1800);
+    expect(up.gstPaise).toBe(144000);
   });
   it("peak uplift above ₹7,500 flips the slab", () => {
     expect(computeRoomLine(registered, { roomId: "r", nights: 1, nightlyRatePaise: 790000 }).gstRateBp).toBe(1800);

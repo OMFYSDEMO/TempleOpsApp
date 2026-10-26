@@ -3,9 +3,9 @@ import { applyBp, type Paise } from "./money";
 export interface GstPolicy {
   /** NULL/empty GSTIN means the property may not charge GST at all (F2). */
   gstin: string | null;
-  /** Declared tariff per room-night at or below which no GST is charged (nil band). */
+  /** Price charged per room-night (ex-GST) at or below which no GST is charged (nil band). */
   nilUptoPaise: Paise;
-  /** Declared tariff per room-night at or below which the lower slab applies. */
+  /** Price charged per room-night (ex-GST) at or below which the lower slab applies. */
   thresholdPaise: Paise;
   belowBp: number;   // 500  = 5% without input credit
   aboveBp: number;   // 1800 = 18% with input credit
@@ -18,8 +18,8 @@ export function gstApplicable(p: GstPolicy): boolean {
 }
 
 /**
- * Slab for one room-night. The slab is decided by the declared tariff for that room-night
- * (ex-GST), not by what was collected. Bands are inclusive at the top:
+ * Slab for one room-night, decided by the value of supply: the price charged for that room-night
+ * (ex-GST). Bands are inclusive at the top:
  * up to ₹1,000 nil, up to ₹7,500 the lower slab (5%), above that the upper slab (18%).
  */
 export function slabBpForRoomNight(p: GstPolicy, declaredTariffPaise: Paise): number {
@@ -48,7 +48,9 @@ export interface RoomLine extends RoomLineInput {
 
 export function computeRoomLine(p: GstPolicy, line: RoomLineInput): RoomLine {
   const declared = line.declaredTariffPaise ?? line.nightlyRatePaise;
-  const gstRateBp = slabBpForRoomNight(p, declared);
+  // The slab follows the value of supply: the price actually charged for the room per night (ex-GST).
+  // "Declared tariff" stopped deciding the rate in 2019; the rate card only decides below/above-tariff approval.
+  const gstRateBp = slabBpForRoomNight(p, line.nightlyRatePaise);
   const roomTotalPaise = line.nightlyRatePaise * line.nights;
   const gstPaise = applyBp(roomTotalPaise, gstRateBp);
   return { ...line, declaredTariffPaise: declared, gstRateBp, roomTotalPaise, gstPaise, grossPaise: roomTotalPaise + gstPaise };

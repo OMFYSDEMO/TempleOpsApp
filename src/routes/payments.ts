@@ -24,9 +24,11 @@ r.get("/due", requireCap("payments"), async (c) => {
     `SELECT b.id AS booking_id, g.name AS guest_name, g.phone AS guest_phone, b.check_in, b.check_out, b.status, b.gross_paise, ch.collection_type,
             (SELECT COALESCE(SUM(CASE WHEN kind='refund' THEN -amount_paise ELSE amount_paise END),0) FROM payments WHERE booking_id = b.id AND status != 'void') AS paid_paise
      FROM bookings b JOIN guests g ON g.id = b.guest_id JOIN channels ch ON ch.id = b.channel_id
-     WHERE b.property_id = ? AND ch.collection_type != 'channel_collect' AND b.status IN ('approved','checked_in','checked_out','provisional') AND b.check_out >= ?
-     ORDER BY b.check_in LIMIT 100`, p.id, today);
-  const due = rows.map((x: any) => ({ ...x, balance_paise: x.gross_paise - x.paid_paise, due_today: x.status === "checked_in" || x.check_in === today || x.check_out === today })).filter((x: any) => x.balance_paise > 0);
+     WHERE b.property_id = ? AND ch.collection_type != 'channel_collect' AND b.status IN ('approved','checked_in','checked_out','provisional')
+       AND (b.check_out >= ? OR b.status = 'checked_out')
+     ORDER BY b.check_in LIMIT 200`, p.id, today);
+  // A guest who has left still owing stays on this list (marked overdue) until it is collected or recorded.
+  const due = rows.map((x: any) => ({ ...x, balance_paise: x.gross_paise - x.paid_paise, overdue: x.status === "checked_out", due_today: x.status === "checked_in" || x.status === "checked_out" || x.check_in === today || x.check_out === today })).filter((x: any) => x.balance_paise > 0);
   return c.json({ due: due.sort((a: any, b: any) => Number(b.due_today) - Number(a.due_today)) });
 });
 

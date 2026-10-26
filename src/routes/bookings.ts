@@ -161,7 +161,8 @@ r.get("/frontdesk/today", requireCap("frontdesk"), async (c) => {
     all(c.env.DB, sql("b.check_in = ? AND b.status IN ('approved','provisional')"), p.id, today),
     // Stays that have already started (or end today) but were never checked in: a guest who came late,
     // or a check-in the desk forgot. Without this list they appear on My work but nowhere on the desk.
-    all(c.env.DB, sql("b.check_in < ? AND b.check_out >= ? AND b.status IN ('approved','provisional')"), p.id, today, today),
+    // Includes stays that have already ended (check-out date passed): the desk records arrival and departure after the fact, or a no-show.
+    all(c.env.DB, sql("b.check_in < ? AND b.status IN ('approved','provisional')"), p.id, today),
     all(c.env.DB, sql("b.check_out = ? AND b.status = 'checked_in'"), p.id, today),
     all(c.env.DB, sql("b.status = 'checked_in' AND b.check_out > ?"), p.id, today),
   ]);
@@ -208,16 +209,29 @@ r.post("/:id/check-out", requireCap("frontdesk"), async (c) => {
   const rooms = await all<{ room_id: string; room_name: string }>(c.env.DB, "SELECT br.room_id, l.name AS room_name FROM booking_rooms br JOIN locations l ON l.id = br.room_id WHERE br.booking_id = ?", bk.id);
   const paid = await paidOnBooking(c.env.DB, bk.id);
   const collectNow = channel.collection_type === "channel_collect" ? 0 : Math.max(0, bk.gross_paise - paid);
-  const b = new Batch(c.env.DB, actor);
+  // Optional departed_at: a check-out recorded after the fact keeps the time the guest really left
+  // (not before they arrived, not in the future). A departure on an earlier day needs no cleaning task now.
+  const x = await body(c).catch(() => ({} as Record<string, unknown>));
   const now = nowIso();
-  b.add("UPDATE bookings SET status = 'checked_out', checked_out_at = ?, updated_at = ? WHERE id = ?", now, now, bk.id);
+  let at = now;
+  const given = optStr(x.departed_at, "departed_at");
+  if (given) {
+    const t = Date.parse(given);
+    if (Number.isNaN(t)) throw new HttpError(400, "departed_at is not a date and time");
+    if (t > Date.now() + 5 * 60_000) throw new HttpError(400, "departure time is in the future");
+    if (bk.checked_in_at && t < Date.parse(bk.checked_in_at)) throw new HttpError(400, "departure is before the guest checked in");
+    at = new Date(t).toISOString();
+  }
+  const pastDeparture = !!given && todayIn(p.timezone, new Date(at)) < todayIn(p.timezone);
+  const b = new Batch(c.env.DB, actor);
+  b.add("UPDATE bookings SET status = 'checked_out', checked_out_at = ?, updated_at = ? WHERE id = ?", at, now, bk.id);
   const taskIds: string[] = [];
-  for (const rm of [...new Map(rooms.map((x) => [x.room_id, x])).values()]) {
+  if (!pastDeparture) for (const rm of [...new Map(rooms.map((x) => [x.room_id, x])).values()]) {
     const tid = id("tsk"); taskIds.push(tid);
     b.add("INSERT INTO tasks (id, property_id, location_id, kind, title, priority, status, due_on, booking_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
       tid, p.id, rm.room_id, "housekeeping", `Clean after checkout · ${rm.room_name}`, "normal", "open", todayIn(p.timezone), bk.id, actor.id);
   }
-  b.audit("booking.check_out", "booking", bk.id, { status: "checked_in" }, { status: "checked_out", at: now, balance_to_collect_paise: collectNow, housekeeping_tasks: taskIds });
+  b.audit("booking.check_out", "booking", bk.id, { status: "checked_in" }, { status: "checked_out", at, ...(given ? { recorded_at: now } : {}), balance_to_collect_paise: collectNow, housekeeping_tasks: taskIds });
   await b.run();
   const invoice = await one<{ id: string; number: string }>(c.env.DB, "SELECT id, number FROM invoices WHERE booking_id = ?", bk.id);
   return c.json({ ok: true, collection_type: channel.collection_type, balance_due_paise: collectNow, paid_paise: paid, gross_paise: bk.gross_paise, housekeeping_tasks: taskIds, invoice, next: collectNow > 0 ? "collect" : invoice ? "done" : channel.collection_type === "channel_collect" ? "done" : "invoice" });

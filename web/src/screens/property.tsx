@@ -12,6 +12,13 @@ export function FrontDesk({ }: { me: Me; refs: Ref }) {
   // No-show cancels the stay, releases the room and blocks payments; it cannot be undone from the desk.
   const noShow = (b: any) => { if (confirm(`Mark ${b.guest_name} as a no-show?\n\nThe room is released and payments can no longer be recorded on this booking. This cannot be undone from the front desk.`)) act(b.id, "no-show", "No-show recorded"); };
   const [arrived, setArrived] = useState<Record<string, string>>({});
+  const [left, setLeft] = useState<Record<string, string>>({});
+  // A stay that has already ended: record arrival and departure in one go (check-in, then check-out with the real times).
+  const inAndOut = (b: any, arrivedAt: string, leftAt: string) => run(async () => {
+    await post(`/bookings/${b.id}/check-in`, { arrived_at: new Date(arrivedAt).toISOString() });
+    const r = await post(`/bookings/${b.id}/check-out`, { departed_at: new Date(leftAt).toISOString() });
+    setResult({ id: b.id, ...r }); await q.reload();
+  }, "Checked in and out ✓");
   const List = ({ title, rows, verb, label }: any) => <Card title={title}>{rows.length === 0 ? <Empty>None today.</Empty> : rows.map((b: any) => <div className="row" key={b.id}><div><div>{b.guest_name} · {b.room_names}</div><div className="sub">{b.channel_name} · {b.collection_type === "channel_collect" ? "OTA collect — nothing to take" : b.paid_paise >= b.gross_paise ? "paid ✓" : `balance ${inr(b.gross_paise - b.paid_paise)}`} · {fmtDate(b.check_in)}→{fmtDate(b.check_out)}</div></div><div className="actions"><Status s={b.status} /><a className={`btn small${b.doc_count ? "" : " gold"}`} href={idsHref(b.id)}>{b.doc_count ? `ID ✓ ${b.doc_count}` : "ID proof"}</a>{verb && <Btn small kind="primary" onClick={() => act(b.id, verb, label + " ✓")}>{label}</Btn>}{verb === "check-in" && <Btn small kind="danger" onClick={() => noShow(b)}>No-show</Btn>}</div></div>)}</Card>;
   if (!q.data) return <Loading error={q.error} />;
   return <>
@@ -19,12 +26,15 @@ export function FrontDesk({ }: { me: Me; refs: Ref }) {
     {result && <Card tone="ok" title="Checked out" sub={result.collection_type === "channel_collect" ? "OTA collect: housekeeping task created, nothing to collect" : result.balance_due_paise > 0 ? `Collect the balance, then issue the invoice` : "Fully paid — issue the invoice"}>
       <Row label="Gross" value={inr(result.gross_paise)} /><Row label="Paid" value={inr(result.paid_paise)} /><Row strong label="Balance due" value={inr(result.balance_due_paise)} />
       <div className="actions end">{result.balance_due_paise > 0 && <a className="btn gold" href={`#pay`} onClick={() => sessionStorage.setItem("avos.collect", result.id)}>Collect {inr(result.balance_due_paise)}</a>}{result.collection_type !== "channel_collect" && <Btn kind="primary" onClick={() => run(async () => { const inv = await post(`/invoices/bookings/${result.id}`); window.open(`/api/invoices/${inv.id}/html`, "_blank"); }, "Invoice issued")}>Issue invoice</Btn>}</div></Card>}
-    {(q.data.late_arrivals ?? []).length > 0 && <Card tone="amb" title="Not checked in yet" sub="the stay has already started but nobody checked the guest in · set when they arrived, then Check in">
-      {q.data.late_arrivals.map((b: any) => { const val = arrived[b.id] ?? `${b.check_in}T14:00`; const nowLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16); return <div className="row lrow" key={b.id}>
+    {(q.data.late_arrivals ?? []).length > 0 && <Card tone="amb" title="Not checked in yet" sub="the stay has started (or already ended) but nobody checked the guest in · set when they arrived, and when they left if the stay is over">
+      {q.data.late_arrivals.map((b: any) => { const val = arrived[b.id] ?? `${b.check_in}T14:00`; const ended = b.check_out < q.data.date; const leftVal = left[b.id] ?? `${b.check_out}T11:00`; const nowLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16); return <div className="row lrow" key={b.id}>
         <div><div><b>{b.guest_name}</b> · {b.room_names}</div><div className="sub">{b.channel_name} · {b.collection_type === "channel_collect" ? "OTA collect — nothing to take" : b.paid_paise >= b.gross_paise ? "paid ✓" : `balance ${inr(b.gross_paise - b.paid_paise)}`} · {fmtDate(b.check_in)}→{fmtDate(b.check_out)}</div></div>
         <div className="actions"><Status s={b.status} /><a className={`btn small${b.doc_count ? "" : " gold"}`} href={idsHref(b.id)}>{b.doc_count ? `ID ✓ ${b.doc_count}` : "ID proof"}</a>
           <label className="muted" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>Arrived <input type="datetime-local" value={val} min={`${b.check_in}T00:00`} max={nowLocal} onChange={(e: any) => setArrived({ ...arrived, [b.id]: e.currentTarget.value })} /></label>
-          <Btn small kind="primary" disabled={b.status !== "approved"} title={b.status === "provisional" ? "awaiting approval by the revenue desk" : undefined} onClick={() => act(b.id, "check-in", "Checked in ✓", { arrived_at: new Date(val).toISOString() })}>Check in</Btn>
+          {ended && <label className="muted" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>Left <input type="datetime-local" value={leftVal} min={val} max={nowLocal} onChange={(e: any) => setLeft({ ...left, [b.id]: e.currentTarget.value })} /></label>}
+          {ended
+            ? <Btn small kind="primary" disabled={b.status !== "approved" || leftVal < val} title={b.status === "provisional" ? "awaiting approval by the revenue desk" : undefined} onClick={() => inAndOut(b, val, leftVal)}>Check in &amp; out</Btn>
+            : <Btn small kind="primary" disabled={b.status !== "approved"} title={b.status === "provisional" ? "awaiting approval by the revenue desk" : undefined} onClick={() => act(b.id, "check-in", "Checked in ✓", { arrived_at: new Date(val).toISOString() })}>Check in</Btn>}
           <Btn small kind="danger" onClick={() => noShow(b)}>No-show</Btn></div>
       </div>; })}
     </Card>}
@@ -54,7 +64,7 @@ export function Payments({ me, refs }: { me: Me; refs: Ref }) {
   return <>
     <h2>Payments <small>W3 · part-payments and advances allowed; gateway fees book themselves, once</small></h2>
     <div className="grid two">
-      <Card title="Collect at property" sub="pre-filtered to who owes money">{!due.data ? <Loading /> : due.data.due.length === 0 ? <Empty>Nobody owes money.</Empty> : due.data.due.map((d: any) => <div className="row" key={d.booking_id}><div><div>{d.guest_name} {d.due_today && <Status s="due today" />}</div><div className="sub">{fmtDate(d.check_in)}→{fmtDate(d.check_out)} · {d.status.replace("_", " ")} · balance of {inr(d.gross_paise)} stay</div></div><div className="actions"><b className="num">{inr(d.balance_paise)}</b><Btn small kind="primary" onClick={() => { setSel(d); setAmt(d.balance_paise); }}>Collect</Btn></div></div>)}</Card>
+      <Card title="Collect at property" sub="pre-filtered to who owes money">{!due.data ? <Loading /> : due.data.due.length === 0 ? <Empty>Nobody owes money.</Empty> : due.data.due.map((d: any) => <div className="row" key={d.booking_id}><div><div>{d.guest_name} {d.overdue ? <Status s="left owing" /> : d.due_today && <Status s="due today" />}</div><div className="sub">{fmtDate(d.check_in)}→{fmtDate(d.check_out)} · {d.status.replace("_", " ")} · balance of {inr(d.gross_paise)} stay</div></div><div className="actions"><b className="num">{inr(d.balance_paise)}</b><Btn small kind="primary" onClick={() => { setSel(d); setAmt(d.balance_paise); }}>Collect</Btn></div></div>)}</Card>
       <Card title={sel ? `${sel.guest_name} · ${inr(sel.balance_paise)}` : "Record a payment"} sub={sel ? "exact balance = one tap; tap the figure for a different amount" : "pick a guest on the left, or record a walk-in collection"}>
         <Keypad value={amt} onChange={setAmt} />
         <Chips value={method} options={METHODS.map(([v, l]) => ({ value: v, label: l }))} onChange={setMethod} />

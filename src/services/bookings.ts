@@ -71,7 +71,7 @@ export async function conflicts(db: D1Database, propertyId: string, roomIds: str
 
 type Line = { roomId: string; nights: number; nightlyRatePaise: number; tariffRatePaise: number | null; gstRateBp: number; roomTotalPaise: number; gstPaise: number; rateVsTariff: RateVsTariff };
 
-/** Price a stay: one booking_rooms line per (room, GST slab), GST computed night by night from the declared tariff. */
+/** Price a stay: one booking_rooms line per (room, GST slab), GST computed night by night from the price charged. */
 export async function priceStay(db: D1Database, property: PropertyRow, roomsIn: { roomId: string; nightlyRatePaise: number }[], checkIn: string, checkOut: string) {
   const cards = await all<RateCardRow>(db, "SELECT room_id, rate_paise, from_date, to_date, priority FROM rate_cards WHERE property_id = ?", property.id);
   const policy = gstPolicy(property);

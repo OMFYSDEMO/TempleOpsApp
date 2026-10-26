@@ -2,6 +2,9 @@ import type { Env } from "../env";
 import { Batch, all, one, type PropertyRow } from "../db";
 import { nowIso, todayIn, previousPeriod, periodOf } from "../domain/dates";
 import { notifyRole } from "./notify";
+import { gstPolicy } from "./bookings";
+import { slabBpForRoomNight } from "../domain/gst";
+import { AFTER_STAY } from "./inboxAuto";
 
 /**
  * The work queue (W14). Every role sees the jobs that are on it right now, built from data that already exists:
@@ -20,7 +23,7 @@ export const ESCALATE_TO: Record<string, string | null> = { sales: "revenue", pr
 /** Hours an item may wait before it is overdue. Start loose; tighten once the slip report shows what is normal. */
 export const TOLERANCE: Record<string, number> = {
   inbox: 2, lead: 1, receipt: 24,
-  arrival: 4, departure: 4, overstay: 1, task: 24,
+  arrival: 4, departure: 4, overstay: 1, task: 24, unpaid: 24, refund: 48, gstslab: 24, airpay: 24,
   approval: 4, payout: 7 * 24, bank: 7 * 24,
   lock: 72, file: 72,
   idproof: 2, formc: 24, idarchive: 72,
@@ -44,7 +47,7 @@ export async function allWorkItems(db: D1Database, p: PropertyRow, now = nowIso(
   for (const r of await all<any>(db, "SELECT id, kind, source, subject, received_at, auto_note, parsed_json FROM inbox_items WHERE property_id = ? AND status = 'pending' ORDER BY received_at", p.id)) {
     const d = r.parsed_json ? JSON.parse(r.parsed_json) : {};
     // Bank alerts and gateway receipts that could not post themselves are the revenue desk's, never sales'.
-    const finance = ["bank_alert", "payment"].includes(r.kind) || ["bank", "airpay"].includes(r.source);
+    const finance = ["bank_alert", "payment"].includes(r.kind) || ["bank", "airpay"].includes(r.source) || String(r.auto_note ?? "").startsWith(AFTER_STAY);
     out.push(item("inbox", `inbox:${r.id}`, `${d.guest_name ?? r.subject ?? "Email"} · ${r.kind.replace("_", " ")} from ${r.source}`, r.auto_note ?? null, finance ? "revenue" : "sales", r.received_at, "#inbox", now));
   }
   // Revenue: a bank alert AVOS could not post (account digits unknown, unreadable) waits in the inbox for the revenue desk.
@@ -54,12 +57,19 @@ export async function allWorkItems(db: D1Database, p: PropertyRow, now = nowIso(
     out.push(item("lead", `lead:${r.id}`, `${r.name ?? "Lead"} · ${r.source} enquiry unanswered`, r.check_in ? `wants ${r.check_in}` : null, "sales", r.created_at, "#leads", now));
   // Property: today's arrivals and departures, overstays, open tasks, gateway receipts not matched to a stay.
   for (const r of await all<any>(db, "SELECT b.id, b.check_in, g.name FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.status = 'approved' AND b.check_in <= ? ORDER BY b.check_in", p.id, today))
-    out.push(item("arrival", `arrival:${r.id}`, `${r.name} arriving ${r.check_in === today ? "today" : r.check_in} · not checked in`, null, "property", localIso(r.check_in, "14:00"), "#desk", now));
+    out.push(item("arrival", `arrival:${r.id}`, `${r.name} arriving ${r.check_in === today ? "today" : r.check_in} · not checked in`, r.check_in < today ? "Front desk → Not checked in yet: set when they arrived (and left), or No-show" : null, "property", localIso(r.check_in, "14:00"), "#desk", now));
   for (const r of await all<any>(db, `SELECT b.id, b.check_out, b.gross_paise, g.name, (SELECT COALESCE(SUM(CASE WHEN kind='refund' THEN -amount_paise ELSE amount_paise END),0) FROM payments WHERE booking_id = b.id AND status != 'void') AS paid
        FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.status = 'checked_in' AND b.check_out <= ? ORDER BY b.check_out`, p.id, today)) {
     const due = r.gross_paise - r.paid;
     if (r.check_out < today) out.push(item("overstay", `overstay:${r.id}`, `${r.name} was due out ${r.check_out} · still checked in`, due > 0 ? `balance ₹${(due / 100).toLocaleString("en-IN")}` : null, "property", localIso(r.check_out, "11:00"), "#desk", now));
     else if (due > 0) out.push(item("departure", `departure:${r.id}`, `${r.name} leaves today · balance ₹${(due / 100).toLocaleString("en-IN")} to collect`, null, "property", localIso(r.check_out, "08:00"), "#desk", now));
+  }
+  // A stay that ended with money still owed (guest pays us: direct and pay-at-property) stays on the desk until
+  // collected; past its tolerance it goes to the owner like any other desk item.
+  for (const r of await all<any>(db, `SELECT b.id, b.check_out, b.checked_out_at, b.gross_paise, g.name, ch.name AS channel, (SELECT COALESCE(SUM(CASE WHEN kind='refund' THEN -amount_paise ELSE amount_paise END),0) FROM payments WHERE booking_id = b.id AND status != 'void') AS paid
+       FROM bookings b JOIN guests g ON g.id = b.guest_id JOIN channels ch ON ch.id = b.channel_id WHERE b.property_id = ? AND b.status = 'checked_out' AND ch.collection_type != 'channel_collect' ORDER BY b.check_out`, p.id)) {
+    const due = r.gross_paise - r.paid;
+    if (due > 0) out.push(item("unpaid", `unpaid:${r.id}`, `${r.name} left ${r.check_out} owing ₹${(due / 100).toLocaleString("en-IN")}`, `${r.channel} · collect, or record what was already collected`, "property", r.checked_out_at ?? localIso(r.check_out, "11:00"), "#pay", now));
   }
   // Guest IDs: a checked-in stay with no document yet; Form C open on a foreign stay; finished stays whose IDs cannot archive because Drive is not connected.
   for (const r of await all<any>(db, "SELECT b.id, b.checked_in_at, g.name FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.status = 'checked_in' AND NOT EXISTS (SELECT 1 FROM guest_documents d WHERE d.booking_id = b.id AND d.deleted_at IS NULL) ORDER BY b.checked_in_at", p.id))
@@ -85,6 +95,35 @@ export async function allWorkItems(db: D1Database, p: PropertyRow, now = nowIso(
     out.push(item("payout", `payout:${r.id}`, `${r.channel} payout for ${r.name} not settled`, `stay ended ${r.check_out} · ₹${(r.gross_paise / 100).toLocaleString("en-IN")} gross`, "revenue", r.checked_out_at ?? localIso(r.check_out, "11:00"), "#payouts", now));
   for (const r of await all<any>(db, "SELECT id, on_date, description, amount_paise FROM bank_statement_lines WHERE property_id = ? AND status IN ('unmatched','proposed') ORDER BY on_date", p.id))
     out.push(item("bank", `bank:${r.id}`, `Bank line ${r.on_date} · ₹${(Math.abs(r.amount_paise) / 100).toLocaleString("en-IN")} ${r.amount_paise < 0 ? "out" : "in"} not reconciled`, r.description, "revenue", localIso(r.on_date, "18:00"), "#recon", now));
+  // Revenue: a live booking taxed on a slab that does not match the price charged (made before the slab followed the price).
+  {
+    const pol = gstPolicy(p);
+    const rows = await all<any>(db, `SELECT b.id, b.check_in, b.created_at, g.name, br.nightly_rate_paise, br.gst_rate_bp FROM bookings b JOIN guests g ON g.id = b.guest_id JOIN booking_rooms br ON br.booking_id = b.id
+       WHERE b.property_id = ? AND b.status IN ('provisional','approved','checked_in') ORDER BY b.check_in`, p.id);
+    const seen = new Set<string>();
+    for (const r of rows) if (!seen.has(r.id) && r.gst_rate_bp !== slabBpForRoomNight(pol, r.nightly_rate_paise)) {
+      seen.add(r.id);
+      out.push(item("gstslab", `gstslab:${r.id}`, `${r.name} (${r.check_in}) · GST slab does not match the price charged`, "check the OTA voucher or quote, then Amend the booking so GST is recomputed", "revenue", r.created_at, "#resv", now));
+    }
+  }
+  // Revenue: money left in Airpay clearing when no Airpay payment is waiting to settle: Airpay's real charges differ from the estimate.
+  {
+    const gw = await one<{ id: string; bal: number; last: string | null }>(db, `SELECT a.id,
+         a.opening_paise + COALESCE((SELECT SUM(CASE WHEN kind='refund' THEN -amount_paise ELSE amount_paise END) FROM payments WHERE account_id = a.id AND status != 'void'),0)
+         + COALESCE((SELECT SUM(amount_paise) FROM other_income WHERE account_id = a.id AND voided_at IS NULL),0)
+         - COALESCE((SELECT SUM(amount_paise) FROM expenses WHERE paid_from_account_id = a.id AND voided_at IS NULL),0)
+         + COALESCE((SELECT SUM(amount_paise) FROM transfers WHERE to_account_id = a.id AND voided_at IS NULL),0)
+         - COALESCE((SELECT SUM(amount_paise) FROM transfers WHERE from_account_id = a.id AND voided_at IS NULL),0) AS bal,
+         (SELECT MAX(received_on) FROM payments WHERE account_id = a.id AND status != 'void') AS last
+       FROM money_accounts a WHERE a.property_id = ? AND a.kind = 'gateway' AND a.active = 1 ORDER BY a.id LIMIT 1`, p.id);
+    const quietSince = gw?.last ? new Date(Date.parse(`${gw.last}T00:00:00+05:30`) + 5 * 86_400_000).toISOString().slice(0, 10) : null;
+    if (gw && gw.bal !== 0 && quietSince && today >= quietSince)
+      out.push(item("airpay", `airpay:${gw.id}:${gw.bal}`, `Airpay clearing holds ₹${(gw.bal / 100).toLocaleString("en-IN")} with nothing left to settle`, "Airpay's actual charges differ from the 2% estimate: adjust the fee expenses to the settlement (or tell the owner)", "revenue", localIso(quietSince, "09:00"), "#recon", now));
+  }
+  // Owner: refunds approved by the revenue desk and not yet paid.
+  for (const r of await all<any>(db, `SELECT a.id, a.summary, a.amount_paise, a.decided_at, a.created_at FROM approvals a WHERE a.property_id = ? AND a.kind = 'refund' AND a.status = 'approved'
+       AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.refund_approval_id = a.id AND p.status != 'void') ORDER BY a.decided_at`, p.id))
+    out.push(item("refund", `refund:${r.id}`, `Refund to pay · ${r.summary}`, `₹${((r.amount_paise ?? 0) / 100).toLocaleString("en-IN")} approved: make the transfer, then record it on Approvals`, "owner", r.decided_at ?? r.created_at, "#appr", now));
   // Accountant: lock last month by the 5th, file GST by the 15th.
   const prev = previousPeriod(periodOf(today));
   const lock: any = (await all<any>(db, "SELECT status FROM period_locks WHERE property_id = ? AND period = ?", p.id, prev))[0];

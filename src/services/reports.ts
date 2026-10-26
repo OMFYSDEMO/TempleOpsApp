@@ -1,3 +1,4 @@
+import { slabBpForRoomNight } from "../domain/gst";
 import { all, one } from "../db";
 import { periodRange } from "../domain/dates";
 
@@ -53,6 +54,16 @@ export async function precloseExceptions(db: D1Database, propertyId: string, per
      AND b.id NOT IN (SELECT si.booking_id FROM settlement_items si JOIN settlements s ON s.id = si.settlement_id WHERE s.status = 'settled')`, propertyId, from, to);
   const uninvoiced = await all<any>(db, `SELECT b.id, g.name AS guest_name, b.check_out FROM bookings b JOIN guests g ON g.id = b.guest_id JOIN channels ch ON ch.id = b.channel_id WHERE b.property_id = ? AND b.status = 'checked_out' AND b.books_date BETWEEN ? AND ? AND ch.collection_type = 'direct' AND b.id NOT IN (SELECT booking_id FROM invoices)`, propertyId, from, to);
   const inHouseOverdue = await all<any>(db, "SELECT id, check_out FROM bookings WHERE property_id = ? AND status = 'checked_in' AND check_out <= ?", propertyId, to);
+  // Stays that ended in the month without a check-in: either the guest came (check in and out after the fact) or a no-show.
+  const neverCheckedIn = await all<any>(db, "SELECT b.id, g.name AS guest_name, b.check_in, b.check_out FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.status IN ('provisional','approved') AND b.check_out <= ?", propertyId, to);
+  // Refunds approved but not paid: money owed to a guest.
+  const refundsToPay = await all<any>(db, "SELECT a.id, a.summary, a.amount_paise FROM approvals a WHERE a.property_id = ? AND a.kind = 'refund' AND a.status = 'approved' AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.refund_approval_id = a.id AND p.status != 'void')", propertyId);
+  // Room-nights in the month taxed on a slab that does not match the price charged.
+  const prop = await one<any>(db, "SELECT gstin, gst_nil_upto_paise, gst_threshold_paise, gst_rate_below_bp, gst_rate_above_bp FROM properties WHERE id = ?", propertyId);
+  const pol = { gstin: prop?.gstin ?? null, nilUptoPaise: prop?.gst_nil_upto_paise ?? 100_000, thresholdPaise: prop?.gst_threshold_paise ?? 750_000, belowBp: prop?.gst_rate_below_bp ?? 500, aboveBp: prop?.gst_rate_above_bp ?? 1800 };
+  const slabRows = await all<any>(db, `SELECT b.id, g.name AS guest_name, b.check_out, br.nightly_rate_paise, br.gst_rate_bp FROM bookings b JOIN guests g ON g.id = b.guest_id JOIN booking_rooms br ON br.booking_id = b.id
+     WHERE b.property_id = ? AND b.status NOT IN ('cancelled','no_show') AND b.books_date BETWEEN ? AND ?`, propertyId, from, to);
+  const wrongSlab = [...new Map(slabRows.filter((r) => r.gst_rate_bp !== slabBpForRoomNight(pol, r.nightly_rate_paise)).map((r) => [r.id, { id: r.id, guest_name: r.guest_name, check_out: r.check_out, charged_bp: r.gst_rate_bp, due_bp: slabBpForRoomNight(pol, r.nightly_rate_paise) }])).values()];
   return {
     period,
     unreconciled_bank_lines: unreconciled,
@@ -62,6 +73,9 @@ export async function precloseExceptions(db: D1Database, propertyId: string, per
     unsettled_ota_stays: unsettled,
     uninvoiced_direct_stays: uninvoiced,
     stays_not_checked_out: inHouseOverdue,
+    stays_never_checked_in: neverCheckedIn,
+    refunds_to_pay: refundsToPay,
+    stays_on_wrong_gst_slab: wrongSlab,
   };
 }
 

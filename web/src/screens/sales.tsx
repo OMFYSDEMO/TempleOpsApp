@@ -97,7 +97,8 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
           <Btn onClick={() => run(async () => { const r = await post(`/inbox/${it.id}/reparse`); await q.reload(); toast(r.auto?.applied ? `Applied automatically: ${r.auto.what}` : r.auto?.note ? `Read again · still waiting: ${r.auto.note}` : `Read again · ${r.status}`); })}>Re-read</Btn>
           {it.kind === "new_reservation" && <Btn kind="primary" disabled={sel.length === 0 || !ratePaise} onClick={() => book(it)}>{sel.length ? `Book ${selNames}${ratePaise ? ` @ ${inr(ratePaise)}/night` : ""}` : "Pick a room to book"}</Btn>}
           {it.kind === "cancellation" && <Btn kind="primary" onClick={() => book(it)}>Cancel the booking</Btn>}
-          {it.kind !== "cancellation" && it.kind !== "payment" && <Btn kind={it.kind === "new_reservation" ? undefined : "primary"} onClick={() => { try { sessionStorage.setItem("avos.bookFromInbox", JSON.stringify({ inbox_item_id: it.id, subject: it.subject, guest_name: d.guest_name ?? "", guest_phone: d.guest_phone ?? "", guest_email: d.guest_email ?? "", check_in: d.check_in ?? "", check_out: d.check_out ?? "", adults: d.adults ?? 2, children: d.children ?? 0, channel_code: it.source === "bookingengine" || it.source === "swiftbook" ? (it.source === "swiftbook" ? "swiftbook" : "direct") : (d.channel ? String(d.channel).toLowerCase().replace(/[^a-z]+/g, "_") : "direct"), external_ref: it.external_ref ?? "", notes: `from email: ${it.subject}` })); } catch {} location.hash = "#resv"; }}>Book by hand in Reservations</Btn>}
+          {it.kind === "modification" && it.booking_match && <Btn kind="primary" onClick={() => { try { sessionStorage.setItem("avos.openBooking", it.booking_match.id); } catch {} location.hash = "#resv"; }}>Amend {it.booking_match.guest_name}'s booking</Btn>}
+          {it.kind !== "cancellation" && it.kind !== "payment" && !(it.kind === "modification" && it.booking_match) && <Btn kind={it.kind === "new_reservation" ? undefined : "primary"} onClick={() => { try { sessionStorage.setItem("avos.bookFromInbox", JSON.stringify({ inbox_item_id: it.id, subject: it.subject, guest_name: d.guest_name ?? "", guest_phone: d.guest_phone ?? "", guest_email: d.guest_email ?? "", check_in: d.check_in ?? "", check_out: d.check_out ?? "", adults: d.adults ?? 2, children: d.children ?? 0, channel_code: it.source === "bookingengine" || it.source === "swiftbook" ? (it.source === "swiftbook" ? "swiftbook" : "direct") : (d.channel ? String(d.channel).toLowerCase().replace(/[^a-z]+/g, "_") : "direct"), external_ref: it.external_ref ?? "", notes: `from email: ${it.subject}` })); } catch {} location.hash = "#resv"; }}>Book by hand in Reservations</Btn>}
         </div>}
         {it.booking_id && <div className="muted">Booking {it.booking_id}{it.booking_status ? ` · ${it.booking_status.replace("_", " ")}` : ""} · see Reservations</div>}
       </Card>;
@@ -116,7 +117,8 @@ export function Inbox({ refs }: { me: Me; refs: Ref }) {
 
 const nightsOf = (ci: string, co: string) => ci && co && ci < co ? Math.round((Date.parse(co) - Date.parse(ci)) / 86_400_000) : 0;
 const addDays = (iso: string, n: number) => new Date(Date.parse(iso) + n * 86_400_000).toISOString().slice(0, 10);
-const slabFor = (me: Me, tariff: number | null, rate: number) => { const d = tariff ?? rate; return !me.property.gstin || d <= me.property.gst_nil_upto_paise ? 0 : d <= me.property.gst_threshold_paise ? me.property.gst_rate_below_bp : me.property.gst_rate_above_bp; };
+// GST follows the price charged per night (the rate card only decides below/above tariff).
+const slabFor = (me: Me, _tariff: number | null, rate: number) => { const d = rate; return !me.property.gstin || d <= me.property.gst_nil_upto_paise ? 0 : d <= me.property.gst_threshold_paise ? me.property.gst_rate_below_bp : me.property.gst_rate_above_bp; };
 const CHANNEL_SHORT: Record<string, string> = { direct: "Direct", booking_com: "Booking.com", makemytrip: "MMT", goibibo: "Goibibo", agoda: "Agoda", cleartrip: "Cleartrip", expedia: "Expedia", yatra: "Yatra", swiftbook: "SwiftBook", referral: "Referral", agent: "Agent" };
 
 /** Who holds each room for a stay, from the availability endpoint. */
@@ -174,8 +176,9 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   const prefill = (() => { try { const s = sessionStorage.getItem("avos.bookFromInbox"); return s ? JSON.parse(s) : null; } catch { return null; } })();
   const [fromInbox, setFromInbox] = useState<any>(prefill);
   const [f, setF] = useState<any>({ guest_name: prefill?.guest_name ?? "", guest_phone: prefill?.guest_phone ?? "", guest_email: prefill?.guest_email ?? "", notes: prefill?.notes ?? "", check_in: prefill?.check_in || today, check_out: prefill?.check_out || addDays(prefill?.check_in || today, 1), adults: prefill?.adults ?? 2, children: prefill?.children ?? 0, channel_code: prefill?.channel_code ?? "direct", external_ref: prefill?.external_ref ?? "", rooms: {} as Record<string, string> });
-  const [open, setOpen] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"upcoming" | "inhouse" | "past" | "cancelled" | "all">("upcoming");
+  // Opened from an inbox card (a modification): show that booking straight away.
+  const [open, setOpen] = useState<string | null>(() => { try { const id = sessionStorage.getItem("avos.openBooking"); if (id) sessionStorage.removeItem("avos.openBooking"); return id; } catch { return null; } });
+  const [filter, setFilter] = useState<"upcoming" | "inhouse" | "past" | "cancelled" | "all">(() => (open ? "all" : "upcoming"));
   const [search, setSearch] = useState("");
   const detail = useLoad(() => open ? get(`/bookings/${open}`) : Promise.resolve(null), [open]);
   const tariffFor = (roomId: string, night: string) => { let best: any = null; for (const c of refs.rate_cards) { if (c.room_id !== roomId) continue; if (c.from_date && night < c.from_date) continue; if (c.to_date && night > c.to_date) continue; if (!best || c.priority > best.priority) best = c; } return best?.rate_paise ?? null; };

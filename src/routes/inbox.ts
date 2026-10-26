@@ -71,7 +71,10 @@ r.get("/", async (c) => {
       suggested_room_ids = rooms.filter((r) => ofType(r) && !holders[r.id]).slice(0, wanted).map((r) => r.id);
       nightly_rate_paise = impliedNightly(p, d, wanted);
     }
-    items.push({ ...x, parsed: d, room_options, suggested_room_ids, nightly_rate_paise });
+    // A modification is applied by amending the booking it refers to, never by booking again.
+    let booking_match: unknown = null;
+    if (x.kind === "modification" && x.external_ref) booking_match = await one(c.env.DB, `SELECT b.id, b.status, b.check_in, b.check_out, g.name AS guest_name FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND ${REF_MATCH} AND b.status NOT IN ('cancelled','no_show') ORDER BY b.created_at DESC LIMIT 1`, p.id, ...refArgs(x.external_ref));
+    items.push({ ...x, parsed: d, room_options, suggested_room_ids, nightly_rate_paise, booking_match });
   }
   return c.json({ items, rooms });
 });
