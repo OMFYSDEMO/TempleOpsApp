@@ -91,6 +91,15 @@ describe("Inbox automation", () => {
     expect((await sql("SELECT COUNT(*) AS n FROM payments WHERE booking_id = ? AND status != 'void'", bk.booking.id))[0].n).toBe(1);
   });
 
+  it("never takes a failed or pending Airpay attempt for a payment", async () => {
+    const mail = (subject: string, head: string) => parseInboundEmail("noreply@airpay.co.in", subject, undefined, `${head}\nOrder ID\n179000000000999\nCustomer Name\nSOME GUEST\nOrder Amount\nINR 5250.00\nAirpay Id\n2099999003\nhttps://nps.airpay.co.in/view.php?id=3`);
+    for (const [subject, head] of [["Order ID 179000000000999 Transaction is Unsuccessful", "INR 5250.00\nTransaction Unsuccessful"], ["Order ID 179000000000999 Transaction Failed", "INR 5250.00\nPayment failed"], ["Order ID 179000000000999 Transaction Pending", "INR 5250.00\nYour transaction is pending"]]) {
+      const p = mail(subject, head);
+      expect(p.data.success).toBe(false); expect(p.confidence).toBe("low");
+    }
+    expect(mail("Congratulations! Order ID 179000000000999 Transaction is Successful", "INR 5250.00\nCollected Successfully").data.success).toBe(true);
+  });
+
   it("dates an Airpay payment the day the receipt was sent, even when it is forwarded later", async () => {
     // Booked by hand with the website reservation number; Airpay's order id is that number.
     const bk = await ok("shaji", "POST", "/api/bookings", { guest_name: "Late Forward Guest", guest_phone: "9500000078", channel_code: "direct", external_ref: "179000000000888", check_in: "2027-07-01", check_out: "2027-07-02", rooms: [{ room_id: "loc_r3", nightly_rate_paise: 500000 }] });

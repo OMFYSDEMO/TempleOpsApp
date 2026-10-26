@@ -224,7 +224,10 @@ export function parseAirpay(subject: string, body: string): ParsedEmail {
     ?? grab(body, /(?:INR|Rs\.?|₹)\s*([\d,]+\.?\d*)\s*Collected Successfully/i) ?? grab(body, new RegExp(`(?:Amount|₹)\\s*:?\\s*${money}`, "i"));
   const airpayId = grab(body, /Airpay\s*Id\s*:?\s*([0-9]{6,})/i);
   const payer = grab(body, /Payer(?: Name)?\s*:?\s*([^\n]+)/i) ?? grab(body, /Customer(?: Name)?\s*:?\s*([^\n]+)/i);
-  const success = /success/i.test(subject + body);
+  // Paid only when Airpay says so in its own words, and never when it reports a failed, declined or pending attempt
+  // ("Unsuccessful" contains "success").
+  const failed = /unsuccessful|\bfail(?:ed|ure)?\b|declined|\baborted\b|\bpending\b|\bcancell?ed\b|\brejected\b/i.test(`${subject}\n${body.slice(0, 1500)}`);
+  const success = !failed && /Transaction is Successful|Transaction Successful|Collected Successfully|Payment (?:is )?Successful|Payment Received Successfully/i.test(`${subject}\n${body}`);
   const data = { order_id: order, airpay_id: airpayId, amount_paise: amount ? rupeesToPaise(amount) : null, payer_name: payer, success };
   return { source: "airpay", kind: "payment", external_ref: order, data, confidence: order && data.amount_paise && success ? "high" : "low" };
 }
