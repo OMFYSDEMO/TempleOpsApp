@@ -49,7 +49,7 @@ export function ThemePanel({ onClose }: { onClose: () => void }) {
   const isDefault = (Object.keys(DEFAULT_THEME) as (keyof Theme)[]).every((k) => t[k] === DEFAULT_THEME[k]);
   return <>
     <button type="button" className="drawer-backdrop" aria-label="Close theme settings" onClick={onClose} />
-    <aside className="drawer" role="dialog" aria-label="Theme settings">
+    <div className="drawer" role="dialog" aria-modal="true" aria-label="Theme settings">
       <header><div><h2>Theme settings</h2><div className="sub">Changes apply at once and are saved on this device</div></div><button type="button" className="btn small" aria-label="Close" onClick={onClose}><Icon name="close" size={16} /></button></header>
       <div className="body">
         <div className="opt"><b>Mode</b>
@@ -72,6 +72,6 @@ export function ThemePanel({ onClose }: { onClose: () => void }) {
         </div>
       </div>
       <footer><button type="button" className="btn" disabled={isDefault} onClick={() => setT({ ...DEFAULT_THEME })}>Reset to default</button><button type="button" className="btn primary" onClick={onClose}>Done</button></footer>
-    </aside>
+    </div>
   </>;
 }

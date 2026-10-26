@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { get, post, patch, del } from "../api";
-import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, BankPick, defaultBankId, inr, fmtDate, fmtDateTime, useLoad, run, toast, thisPeriod, todayIso, CategoryPicker, ask, askConfirm, askText, tell, ScrollX } from "../ui";
+import { Card, Row, Btn, Chips, Field, Status, Empty, Loading, BankPick, defaultBankId, inr, fmtDate, fmtDateTime, useLoad, run, toast, thisPeriod, todayIso, CategoryPicker, ask, askConfirm, askText, tell, ScrollX, actionLabel } from "../ui";
 import { DriveSettings } from "./ids";
-import { catLabel, type Me, type Ref } from "../app";
+import { Icon } from "../icons";
+import { canOpen, catLabel, type Me, type Ref } from "../app";
 
 export function Approvals({ me, refs }: { me: Me; refs: Ref }) {
   const [refundBank, setRefundBank] = useState(defaultBankId(refs.accounts));
@@ -81,22 +82,76 @@ export function Reconcile({ me, refs }: { me: Me; refs: Ref }) {
   </>;
 }
 
+/**
+ * The pre-close checks in words: what each one means, who fixes it, where, and whether it blocks the close or can
+ * be carried with a note (the server's rule in routes/close.ts).
+ */
+const CHECKS: Record<string, { label: string; why: string; fix: string; screen: string; blocks?: boolean }> = {
+  pending_approvals: { label: "Approvals waiting", why: "bookings below tariff and refunds need a decision", fix: "Approvals", screen: "appr", blocks: true },
+  stays_not_checked_out: { label: "Guests still checked in after their stay", why: "check them out so the stay lands in this month", fix: "Front desk", screen: "desk", blocks: true },
+  uninvoiced_direct_stays: { label: "Direct stays without an invoice", why: "every stay paid to us needs a GST invoice", fix: "Guest invoices", screen: "invoice", blocks: true },
+  stays_never_checked_in: { label: "Stays never checked in", why: "check the guest in and out after the fact, or mark a no-show", fix: "Front desk", screen: "desk" },
+  part_paid_stays: { label: "Stays with money still owed", why: "collect it, or record what was already collected", fix: "Payments", screen: "pay" },
+  refunds_to_pay: { label: "Approved refunds not yet paid", why: "make the transfer and record it", fix: "Approvals", screen: "appr" },
+  unsettled_ota_stays: { label: "OTA stays not yet paid out", why: "match the channel's payout when it arrives", fix: "OTA payouts", screen: "payouts" },
+  unreconciled_bank_lines: { label: "Bank lines not matched", why: "every bank line should match a record in the books", fix: "Smart Reconcile", screen: "recon" },
+  expenses_missing_bill_details: { label: "Expenses without bill details", why: "add the vendor and bill number for the accountant", fix: "Expenses", screen: "pexp" },
+  stays_on_wrong_gst_slab: { label: "Stays taxed on the wrong GST slab", why: "amend the booking so GST follows the price charged", fix: "Reservations", screen: "resv" },
+};
+const itemName = (x: any): string | null => x.guest_name ?? x.description ?? x.summary ?? x.vendor_name ?? (x.external_ref ? `ref ${x.external_ref}` : null) ?? (x.category ? String(x.category).replace(/_/g, " ") : null);
+
+const names = (list: any[]) => { const n = list.map(itemName).filter(Boolean) as string[]; return n.length ? ` · ${n.slice(0, 4).join(", ")}${list.length > 4 ? ` and ${list.length - 4} more` : ""}` : ""; };
+
+function CloseChecklist({ me, period, counts }: { me: Me; period: string; counts: Record<string, number> }) {
+  const items = useLoad(() => get(`/reports/preclose?period=${period}`).catch(() => null), [period]);
+  const keys = Object.keys(counts).sort((a, b) => Number(!!CHECKS[b]?.blocks) - Number(!!CHECKS[a]?.blocks));
+  const open = keys.filter((k) => counts[k] > 0), clear = keys.filter((k) => !counts[k]);
+  return <>
+    {open.length === 0 ? <div className="allclear"><Icon name="tick" /> All {keys.length} checks are clear for {period}.</div> : <ul className="checklist">{open.map((k) => {
+      const c = CHECKS[k] ?? { label: k.replace(/_/g, " "), why: "", fix: "", screen: "" };
+      const list: any[] = items.data?.[k] ?? [];
+      return <li key={k} className={c.blocks ? "blocks" : ""}>
+        <span className="count" aria-label={`${counts[k]} item${counts[k] > 1 ? "s" : ""}`}>{counts[k]}</span>
+        <div className="what"><b>{c.label}</b> <span className={`status ${c.blocks ? "bad" : "amb"}`}>{c.blocks ? "must be fixed" : "can be carried"}</span>
+          <div className="sub">{c.why}{names(list)}</div></div>
+        {c.screen && canOpen(me, c.screen) ? <a className="btn small" href={`#${c.screen}`}>Open {c.fix}</a> : c.fix ? <span className="sub">in {c.fix}</span> : null}
+      </li>;
+    })}</ul>}
+    {open.length > 0 && clear.length > 0 && <details className="clearlist"><summary>{clear.length} check{clear.length > 1 ? "s" : ""} already clear</summary>{clear.map((k) => <div key={k} className="sub">✓ {CHECKS[k]?.label ?? k.replace(/_/g, " ")}</div>)}</details>}
+  </>;
+}
+
+/** The month's three steps and where it stands: pre-close (revenue desk) → lock (accountant) → GST filed. */
+function CloseSteps({ lock, period }: { lock: any; period: string }) {
+  const at = ["open", "precleared", "locked", "filed"].indexOf(lock.status);
+  const [y, m] = period.split("-").map(Number); const next = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 4)).toLocaleString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+  const steps = [
+    { title: "Pre-close", who: "Revenue desk", note: at >= 1 ? `cleared ${fmtDateTime(lock.precleared_at)}` : "clear or carry the checks below" },
+    { title: "Lock the month", who: "Accountant", note: at >= 2 ? `locked ${fmtDateTime(lock.locked_at)} · pack v${lock.version}` : `due by ${next}` },
+    { title: "GST filed", who: "Accountant", note: at >= 3 ? `filed ${fmtDateTime(lock.filed_at)}` : "file from the GST filing sheet" },
+  ];
+  return <ol className="steps" aria-label={`${period} close progress`}>{steps.map((s, i) => { const st = i < at ? "done" : i === at ? "now" : "todo"; return <li key={s.title} className={st} aria-current={st === "now" ? "step" : undefined}>
+    <span className="dot" aria-hidden="true">{st === "done" ? "✓" : i + 1}</span>
+    <div><b>{s.title}</b><span className="sub">{s.who} · {s.note}</span>{st === "now" && <span className="sr-only"> (current step)</span>}{st === "done" && <span className="sr-only"> (done)</span>}</div>
+  </li>; })}</ol>;
+}
+
 export function RevenueOverview({ me }: { me: Me; refs: Ref }) {
   const [period, setPeriod] = useState(thisPeriod());
   const q = useLoad(() => get(`/reports/revenue?period=${period}`), [period]);
-  const pre = useLoad(() => get(`/reports/preclose?period=${period}`), [period]);
   const close = useLoad(() => get(`/close/${period}`), [period]);
-  const preclear = (ack: boolean) => run(async () => { const note = ack ? await askText("Carry the remaining exceptions", "Note for the CA", { ok: "Clear pre-close" }) : null; if (ack && !note) return; await post(`/close/${period}/preclear`, ack ? { acknowledge: true, note } : {}); await close.reload(); }, "Pre-close cleared · handed to the CA");
+  const preclear = (ack: boolean) => run(async () => { const note = ack ? await askText("Carry the open checks into the close?", "Note for the accountant", { ok: "Hand to the accountant", body: "Checks marked “must be fixed” cannot be carried. The rest go to the accountant with your note." }) : null; if (ack && !note) return; await post(`/close/${period}/preclear`, ack ? { acknowledge: true, note } : {}); await close.reload(); }, "Pre-close cleared · handed to the CA");
   return <>
     <h1>Revenue overview <small>revenue oversight and the pre-close; full P&amp;L stays with the owner and the CA</small></h1>
     <Field label="Month"><input type="month" value={period} onChange={(e: any) => setPeriod(e.currentTarget.value)} /></Field>
     {!q.data ? <Loading error={q.error} /> : <>
       <div className="kpi"><div className="k"><small>Revenue (ex-GST)</small><b>{inr(q.data.taxable_paise)}</b></div><div className="k"><small>Direct share</small><b>{q.data.direct_share_pct}%</b></div><div className="k"><small>OTA clearing</small><b>{inr(q.data.ota_clearing.paise)}</b></div><div className="k"><small>Pending approvals</small><b>{q.data.pending_approvals}</b></div><div className="k"><small>Stays</small><b>{q.data.stays}</b></div></div>
       <Card title="By channel">{q.data.by_source.length === 0 ? <Empty>No checked-out stays in {period}.</Empty> : q.data.by_source.map((s: any) => <div className="row" key={s.channel}><div style={{ flex: 1 }}><div>{s.channel} <span className="sub">· {s.stays} stay(s)</span></div><div className="bar"><i style={{ width: `${Math.max(2, Math.round((s.taxable_paise * 100) / Math.max(1, q.data.by_source[0].taxable_paise)))}%` }} /></div></div><div className="num">{inr(s.taxable_paise)}</div></div>)}{q.data.other_income && q.data.other_income.n > 0 && <Row label={`Other income · ${q.data.other_income.by_category.map((c: any) => `${c.category} ${c.n}`).join(", ")}`} value={inr(q.data.other_income.taxable_paise)} sub={`GST ${inr(q.data.other_income.gst_paise)} · rooms alone ${inr(q.data.rooms_taxable_paise)}`} />}{q.data.advances_for_future_stays.n > 0 && <div className="muted">Advances received this month for later stays: {inr(q.data.advances_for_future_stays.paise)} — GST time-of-supply item for the CA.</div>}</Card></>}
-    {pre.data && close.data && <Card title={`Pre-close · ${period}`} sub={<>Month status: <Status s={close.data.lock.status} />{close.data.lock.version ? ` · pack v${close.data.lock.version}` : ""}</>}>
-      {Object.entries(pre.data).filter(([k]) => k !== "period").map(([k, v]: any) => <Row key={k} label={k.replace(/_/g, " ")} value={<span style={{ color: v.length ? "var(--amb)" : "var(--ok)" }}>{v.length}</span>} />)}
-      {close.data.lock.status === "open" && <div className="actions end"><Btn onClick={() => preclear(true)}>Carry exceptions &amp; clear</Btn><Btn kind="primary" disabled={!close.data.clear} onClick={() => preclear(false)}>Approve for close</Btn></div>}
-      <span hidden>{me.actor.id}</span></Card>}
+    {close.data && <Card title={`Close ${period}`} sub="fix what must be fixed, then hand the month to the accountant">
+      <CloseSteps lock={close.data.lock} period={period} />
+      <CloseChecklist me={me} period={period} counts={close.data.exception_counts} />
+      {close.data.lock.status === "open" && <div className="actions end">{!close.data.clear && <Btn onClick={() => preclear(true)}>Carry the rest with a note</Btn>}<Btn kind="primary" disabled={!close.data.clear} title={close.data.clear ? undefined : "Every check must be clear, or carried with a note"} onClick={() => preclear(false)}>Hand to the accountant</Btn></div>}
+    </Card>}
   </>;
 }
 
@@ -241,37 +296,47 @@ function ChannelEdit({ c }: { c: any }) {
   return <div className="grid two">{(["commission_bp", "payment_fee_bp", "tcs_bp", "tds_bp"] as const).map((k) => <Field key={k} label={`${k.replace("_bp", "").replace("_", " ")} (bp: 2300 = 23%)`}><input type="number" value={(f as any)[k]} onChange={(e: any) => setF({ ...f, [k]: Number(e.currentTarget.value) })} /></Field>)}<div className="actions end"><Btn small kind="primary" onClick={() => run(async () => { await patch(`/admin/channels/${c.id}`, f); }, "Terms updated · audited")}>Save</Btn></div></div>;
 }
 
-export function MonthClose({ }: { me: Me; refs: Ref }) {
+export function MonthClose({ me }: { me: Me; refs: Ref }) {
   const [period, setPeriod] = useState(thisPeriod());
   const q = useLoad(() => get(`/close/${period}`), [period]);
   const lock = () => run(async () => { const r = await post(`/close/${period}/lock`); toast(`Locked · pack v${r.version} stored`); await q.reload(); });
   const unlock = async () => { const reason = await askText("Unlock this month?", "Reason", { ok: "Unlock", danger: true, body: "Re-locking creates a revised pack." }); if (reason) await run(async () => { const r = await post(`/close/${period}/unlock`, { reason }); if (r.warning) await tell("GST was already filed for this period", "The next lock produces a revised pack and an amendment will be needed."); await q.reload(); }, "Unlocked"); };
   return <>
-    <h1>Month close <small>the revenue desk clears the pre-close, the accountant locks the month by the 4th, and the lock applies to everyone</small></h1>
-    <Field label="Month"><input type="month" value={period} onChange={(e: any) => setPeriod(e.currentTarget.value)} /></Field>
+    <div className="pagehead"><h1>Month close <small>three steps each month; once locked, nobody can change the month without unlocking it</small></h1><MonthPick value={period} onChange={setPeriod} /></div>
     {!q.data ? <Loading error={q.error} /> : <>
-      <Card title={<>{period} · <Status s={q.data.lock.status} /></>} sub={q.data.lock.status === "open" ? "waiting for the revenue desk to clear the pre-close" : q.data.lock.status === "precleared" ? `cleared by the revenue desk ${fmtDateTime(q.data.lock.precleared_at)}` : `locked ${fmtDateTime(q.data.lock.locked_at)} · v${q.data.lock.version}${q.data.lock.filed_at ? ` · filed ${fmtDateTime(q.data.lock.filed_at)}` : ""}`}>
-        {Object.entries(q.data.exception_counts).map(([k, v]: any) => <Row key={k} label={k.replace(/_/g, " ")} value={<span style={{ color: v ? "var(--amb)" : "var(--ok)" }}>{v}</span>} />)}
-        <div className="actions end">{q.data.lock.status === "precleared" && <Btn kind="primary" onClick={lock}>Lock {period}</Btn>}{["locked", "filed"].includes(q.data.lock.status) && <Btn kind="danger" onClick={unlock}>Unlock (creates v{q.data.lock.version + 1} “revised”)</Btn>}</div></Card>
-      <Card title="Statement packs" sub="stored immutably in R2; every version kept">{q.data.packs.length === 0 ? <Empty>No pack yet.</Empty> : q.data.packs.map((pk: any) => <div className="row" key={pk.id}><div><div>Pack v{pk.version}{pk.revised ? " · revised" : ""}</div><div className="sub">{fmtDateTime(pk.created_at)}</div></div><div className="actions">{Object.keys(JSON.parse(pk.keys_json)).map((f) => <a key={f} className="btn small" href={`/api/close/${period}/pack/${pk.version}/${f}`}>{f}</a>)}</div></div>)}</Card></>}
+      <Card><CloseSteps lock={q.data.lock} period={period} />
+        <div className="actions end">{q.data.lock.status === "precleared" && <Btn kind="primary" onClick={lock}>Lock {period}</Btn>}{["locked", "filed"].includes(q.data.lock.status) && <Btn kind="danger" onClick={unlock}>Unlock {period}</Btn>}</div></Card>
+      <Card title="Checks before the close" sub={q.data.lock.status === "open" ? "the revenue desk fixes these, or carries them with a note" : "as they stand now"}><CloseChecklist me={me} period={period} counts={q.data.exception_counts} /></Card>
+      <Card title="Statement packs" sub="the month's registers as files, kept for every version">{q.data.packs.length === 0 ? <Empty>The pack is made when the month is locked.</Empty> : q.data.packs.map((pk: any) => <div className="row" key={pk.id}><div><div>Pack v{pk.version}{pk.revised ? " · revised" : ""}</div><div className="sub">{fmtDateTime(pk.created_at)}</div></div><div className="actions">{Object.keys(JSON.parse(pk.keys_json)).map((f) => <a key={f} className="btn small" href={`/api/close/${period}/pack/${pk.version}/${f}`} download>{f}</a>)}</div></div>)}</Card></>}
   </>;
+}
+
+/** Month picker that sits beside a page title. */
+function MonthPick({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return <label className="monthpick"><span>Month</span><input type="month" value={value} onChange={(e: any) => e.currentTarget.value && onChange(e.currentTarget.value)} /></label>;
 }
 
 export function GstSheet({ me }: { me: Me; refs: Ref }) {
   const [period, setPeriod] = useState(thisPeriod());
   const q = useLoad(() => get(`/close/${period}/gst`), [period]);
   const lock = useLoad(() => get(`/close/${period}`), [period]);
+  const st = lock.data?.lock.status;
   return <>
-    <h1>GST filing sheet <small>the GSTR-1 and GSTR-3B figures, ready to check and file</small></h1>
-    <Field label="Month"><input type="month" value={period} onChange={(e: any) => setPeriod(e.currentTarget.value)} /></Field>
+    <div className="pagehead"><h1>GST filing sheet <small>the GSTR-1 and GSTR-3B figures, ready to check and file</small></h1><MonthPick value={period} onChange={setPeriod} /></div>
     {!me.property.gstin && <div className="queue">No GSTIN on the property: nothing to file yet. Invoices carry no GST until the owner enters the GSTIN under Settings.</div>}
     {!q.data ? <Loading error={q.error} /> : <>
-      <Card title="Output tax">{q.data.by_slab.map((s: any) => <Row key={s.rate_pct} label={`Taxable value @ ${s.rate_pct}% slab`} value={inr(s.taxable_paise)} sub={`GST ${inr(s.gst_paise)}`} />)}{q.data.credit_notes.taxable_paise > 0 && <Row label="Less credit notes" value={`− ${inr(q.data.credit_notes.taxable_paise)}`} sub={`GST − ${inr(q.data.credit_notes.gst_paise)}`} />}<Row strong label="Output GST" value={inr(q.data.output_gst_paise)} />
-        {q.data.advances_received_for_future_stays.n > 0 && <div className="muted">Advances received this month for later stays: {inr(q.data.advances_received_for_future_stays.paise)} — confirm time-of-supply treatment.</div>}</Card>
-      <div className="grid two"><Card title="TCS deducted by OTAs · accept on portal">{q.data.tcs.length === 0 ? <Empty>None.</Empty> : q.data.tcs.map((t: any) => <Row key={t.status} label={`${t.n} settlement(s) · ${t.status}`} value={inr(t.amount_paise)} />)}</Card><Card title="TDS 194-O · verify in 26AS / AIS">{q.data.tds.length === 0 ? <Empty>None.</Empty> : q.data.tds.map((t: any) => <Row key={t.status} label={`${t.n} settlement(s) · ${t.status}`} value={inr(t.amount_paise)} />)}</Card></div>
-      <Card title="GST on purchases" sub={q.data.input_gst_on_purchases.note}><Row label={`${q.data.input_gst_on_purchases.n} bill(s) with GST`} value={inr(q.data.input_gst_on_purchases.gst_paise)} /></Card>
-      {lock.data && <div className="actions end">{lock.data.lock.status === "locked" && <Btn kind="primary" onClick={() => run(async () => { await post(`/close/${period}/file`, {}); await lock.reload(); }, "Marked filed")}>Mark Filed</Btn>}{lock.data.lock.status === "filed" && <Status s="filed" />}</div>}
-      <Card title="Change log · every edit in the month, who and when, before and after">{q.data.change_log.length === 0 ? <Empty>No edits.</Empty> : q.data.change_log.map((c: any) => <div className="row" key={c.id}><div><div>{c.action} · {c.entity} {c.entity_id}</div><div className="sub">{c.actor_email} · {fmtDateTime(c.at)}</div><div className="pre muted">{c.before_json ? `before ${c.before_json}` : ""} {c.after_json ? `after ${c.after_json}` : ""}</div></div></div>)}</Card></>}
+      <div className="kpi">
+        <div className="k"><small>Output GST payable</small><b>{inr(q.data.output_gst_paise)}</b></div>
+        <div className="k"><small>Taxable value</small><b>{inr(q.data.by_slab.reduce((t: number, x: any) => t + x.taxable_paise, 0) - q.data.credit_notes.taxable_paise)}</b></div>
+        <div className="k"><small>Filing status</small><b>{st ? <Status s={st === "open" || st === "precleared" ? "waiting" : st} /> : "—"}</b>
+          <span className="sub">{st === "filed" ? "filed" : st === "locked" ? "locked · ready to file" : "lock the month before filing"}</span>
+          {st === "locked" && <div style={{ marginTop: "10px" }}><Btn kind="primary" small onClick={() => run(async () => { await post(`/close/${period}/file`, {}); await lock.reload(); }, "Marked filed")}>Mark filed</Btn></div>}</div>
+      </div>
+      <Card title="Output tax" sub="GSTR-1 and table 3.1 of GSTR-3B">{q.data.by_slab.length === 0 ? <Empty>No taxable supplies in {period}.</Empty> : q.data.by_slab.map((s: any) => <Row key={s.rate_pct} label={`Taxable value @ ${s.rate_pct}%`} value={inr(s.taxable_paise)} sub={`GST ${inr(s.gst_paise)}`} />)}{q.data.credit_notes.taxable_paise > 0 && <Row label="Less credit notes" value={`− ${inr(q.data.credit_notes.taxable_paise)}`} sub={`GST − ${inr(q.data.credit_notes.gst_paise)}`} />}<Row strong label="Output GST" value={inr(q.data.output_gst_paise)} />
+        {q.data.advances_received_for_future_stays.n > 0 && <div className="note" style={{ marginTop: "12px" }}>Advances received this month for later stays: <b>{inr(q.data.advances_received_for_future_stays.paise)}</b>. Confirm the time-of-supply treatment.</div>}</Card>
+      <div className="grid two"><Card title="TCS deducted by OTAs" sub="accept on the GST portal">{q.data.tcs.length === 0 ? <Empty>None this month.</Empty> : q.data.tcs.map((t: any) => <Row key={t.status} label={`${t.n} settlement${t.n > 1 ? "s" : ""} · ${t.status}`} value={inr(t.amount_paise)} />)}</Card><Card title="TDS under 194-O" sub="verify in 26AS / AIS">{q.data.tds.length === 0 ? <Empty>None this month.</Empty> : q.data.tds.map((t: any) => <Row key={t.status} label={`${t.n} settlement${t.n > 1 ? "s" : ""} · ${t.status}`} value={inr(t.amount_paise)} />)}</Card></div>
+      <Card title="GST on purchases" sub={q.data.input_gst_on_purchases.note}><Row label={`${q.data.input_gst_on_purchases.n} bill${q.data.input_gst_on_purchases.n === 1 ? "" : "s"} with GST`} value={inr(q.data.input_gst_on_purchases.gst_paise)} /></Card>
+      <Card title="Corrections in the month" sub="records edited or voided after they were made, for review before filing" actions={canOpen(me, "audit") ? <a className="btn small" href="#audit">Open the change log</a> : undefined}><Row label={`${q.data.change_log.length} correction${q.data.change_log.length === 1 ? "" : "s"} in ${period}`} value={q.data.change_log.length ? `latest ${fmtDateTime(q.data.change_log[q.data.change_log.length - 1].at)}` : "none"} /></Card></>}
   </>;
 }
 
@@ -280,8 +345,7 @@ export function AuditLog({ }: { me: Me; refs: Ref }) {
   const [limit, setLimit] = useState(100);
   const q = useLoad(() => get(`/reports/audit?period=${period}`), [period]);
   return <>
-    <h1>Change log <small>who, when, before and after</small></h1>
-    <Field label="Month"><input type="month" value={period} onChange={(e: any) => { setPeriod(e.currentTarget.value); setLimit(100); }} /></Field>
-    {!q.data ? <Loading error={q.error} /> : q.data.audit.length === 0 ? <Empty>Nothing in {period}.</Empty> : <Card title={`${q.data.audit.length} entries`} actions={q.data.audit.length > limit && <Btn small onClick={() => setLimit(limit + 200)}>Show {Math.min(200, q.data.audit.length - limit)} more</Btn>}>{q.data.audit.slice(0, limit).map((a: any) => <div className="row" key={a.id}><div><div>{a.action} · {a.entity} <span className="mono">{a.entity_id}</span></div><div className="sub">{a.actor_email} · {fmtDateTime(a.at)}</div>{(a.before_json || a.after_json) && <details><summary>detail</summary><div className="pre">{a.before_json && `before: ${a.before_json}\n`}{a.after_json && `after: ${a.after_json}`}</div></details>}</div></div>)}</Card>}
+    <div className="pagehead"><h1>Change log <small>every change to the books: who, when, before and after</small></h1><MonthPick value={period} onChange={(v) => { setPeriod(v); setLimit(100); }} /></div>
+    {!q.data ? <Loading error={q.error} /> : q.data.audit.length === 0 ? <Empty>Nothing in {period}.</Empty> : <Card title={`${q.data.audit.length} entries`} actions={q.data.audit.length > limit && <Btn small onClick={() => setLimit(limit + 200)}>Show {Math.min(200, q.data.audit.length - limit)} more</Btn>}>{q.data.audit.slice(0, limit).map((a: any) => <div className="row" key={a.id}><div><div><b>{actionLabel(a.action)}</b> <span className="mono muted">{a.entity_id}</span></div><div className="sub">{a.actor_email} · {fmtDateTime(a.at)}</div>{(a.before_json || a.after_json) && <details><summary>detail</summary><div className="pre">{a.before_json && `before: ${a.before_json}\n`}{a.after_json && `after: ${a.after_json}`}</div></details>}</div></div>)}</Card>}
   </>;
 }

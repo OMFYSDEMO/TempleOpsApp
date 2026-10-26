@@ -343,3 +343,37 @@ main:focus { outline: none; }
 @media (max-width: 600px) { .row:has(> .actions) { flex-wrap: wrap; } .row > .actions { max-width: 100%; } .row > .actions select { max-width: 100%; } }
 code { overflow-wrap: anywhere; }
 .avail .r { grid-template-columns: minmax(96px, max-content); grid-auto-columns: minmax(44px, 1fr); } .avail .r .n { position: sticky; left: 0; z-index: 1; background: var(--card); padding-right: 6px; white-space: nowrap; }
+
+/* Page header with the page's main action on the right */
+.pagehead { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; } .pagehead h1 { margin-bottom: 0; }
+/* Wide drawer for a task (new booking, booking detail) */
+.drawer.wide { width: min(880px, 100vw); }
+.drawer.wide .body { padding: 18px 24px 24px; } .drawer.wide > header { padding: 18px 24px; } .drawer.wide > footer { padding-left: 24px; padding-right: 24px; }
+.drawer > footer .total { display: flex; flex-direction: column; } .drawer > footer .total b { font-size: 1.2rem; font-variant-numeric: tabular-nums; } .drawer > footer .total small { color: var(--muted); font-size: .8667rem; }
+body.noscroll { overflow: hidden; }
+@media (max-width: 600px) { .drawer.wide .body { padding: 14px 16px 20px; } .drawer.wide > header { padding: 14px 16px; } .drawer.wide > footer { padding-left: 16px; padding-right: 16px; } }
+.form-grid.two { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; font-weight: 650; color: var(--ink); cursor: pointer; text-align: left; } .linkbtn:hover { color: var(--accent-text); text-decoration: underline; }
+td.nowrap, .nowrap { white-space: nowrap; }
+table.t .pills { display: flex; gap: 4px; flex-wrap: wrap; }
+.chanpick .paidby { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--soft2); border: 1px solid var(--softline); } .chanpick .paidby > .sub { display: block; margin-bottom: 6px; font-weight: 600; color: var(--ink2); }
+.drawer .section:first-of-type { border-top: 0; padding-top: 4px; }
+
+/* Month close: three-step progress and the pre-close checklist */
+.steps { list-style: none; margin: 0 0 6px; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.steps li { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--card); }
+.steps li b { display: block; font-size: 1rem; } .steps li .sub { display: block; color: var(--muted); font-size: .8667rem; margin-top: 2px; }
+.steps .dot { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: .9rem; background: var(--line2); color: var(--muted); }
+.steps li.done .dot { background: var(--okbg); color: var(--ok); } .steps li.now { border-color: var(--fill); box-shadow: 0 0 0 3px var(--soft); } .steps li.now .dot { background: var(--fill); color: #fff; }
+.checklist { list-style: none; margin: 0; padding: 0; }
+.checklist li { display: flex; gap: 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line2); } .checklist li:last-child { border-bottom: 0; }
+.checklist .count { flex: none; min-width: 38px; height: 38px; padding: 0 8px; border-radius: 12px; display: grid; place-items: center; font-weight: 700; background: var(--ambbg); color: var(--amb); font-variant-numeric: tabular-nums; }
+.checklist li.blocks .count { background: var(--badbg); color: var(--bad); }
+.checklist .what { flex: 1; min-width: 0; } .checklist .what .sub { color: var(--muted); font-size: .8667rem; margin-top: 2px; } .checklist .status { margin-left: 6px; }
+.allclear { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-radius: 12px; background: var(--okbg); color: var(--ok); font-weight: 600; }
+.clearlist { margin-top: 10px; } .clearlist .sub { color: var(--muted); padding: 3px 0; }
+.monthpick { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: .9333rem; } .monthpick input { padding: 9px 12px; border-radius: 10px; border: 1px solid var(--field-line); background: var(--card); color: var(--ink); font: inherit; }
+.kpi .k .sub { display: block; color: var(--muted); font-size: .8667rem; margin-top: 6px; } .kpi .k:first-child .sub { color: #fff; opacity: .85; }
+@media (max-width: 760px) { .steps { grid-template-columns: 1fr; } .checklist li { flex-wrap: wrap; } .checklist li > .btn { margin-left: 52px; } }
+.drawer > footer .actions { flex-wrap: nowrap; } .drawer > footer .total small.need { color: var(--amb); font-weight: 600; }
+@media (max-width: 600px) { .drawer > footer .actions .btn:not(.primary) { display: none; } }

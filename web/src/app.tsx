@@ -14,6 +14,8 @@ import { Icon } from "./icons";
 
 export interface Me { actor: { id: string; name: string; role: string; email: string; via?: string }; property: { id: string; name: string; gstin: string | null; today: string; auto_approve_on_tariff: boolean; gst_nil_upto_paise: number; gst_threshold_paise: number; gst_rate_below_bp: number; gst_rate_above_bp: number }; capabilities: string[]; unread_notifications: number; must_change_password?: boolean; has_password?: boolean; }
 export interface Ref { locations: any[]; channels: any[]; accounts: any[]; users: any[]; rate_cards: any[]; expense_categories: { code: string; label: string; family: string; petty: boolean; bank: boolean }[]; expense_families: string[]; common_categories: { petty: string[]; bank: string[] }; }
+/** Whether this person has the screen behind a link, so checklists only link where the reader can go. */
+export const canOpen = (me: Me, key: string) => SCREENS.some((s) => s.key === key && me.capabilities.includes(s.cap));
 export const catLabel = (refs: Ref, code: string) => refs.expense_categories?.find((c) => c.code === code)?.label ?? code;
 
 type Screen = { key: string; label: string; cap: string; group: string; comp: (p: { me: Me; refs: Ref }) => any; mobile?: boolean; icon: string };

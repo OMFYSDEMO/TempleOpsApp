@@ -35,7 +35,9 @@ Three habits that make everything else work:
 - If a card cannot be read, or the room type is one AVOS does not know, press **Book by hand in Reservations**: the booking form opens with whatever the email carried, you tap the room and save, and the card is marked done. Nothing is ever stuck on Dismiss or Re-read.
 
 ### Reservations
-- **New booking** runs in three steps: the stay (dates, adults, channel), the rooms, the guest.
+- The screen opens on your bookings. Tap a guest's name, or anywhere on the row, to open the booking in a panel on the right; Esc or ✕ closes it and the list stays where it was.
+- **+ New booking** (top right) opens the form in the same panel, in three steps: the stay (dates, adults, channel), the rooms, the guest. The total and **Save booking** stay at the bottom of the panel; if Save is grey, the line beside it says what is missing. Closing the panel keeps what you typed until you save.
+- **Channel:** pick the channel, then, for Booking.com, Cleartrip and Expedia, answer **Who takes the guest's money?**: the OTA online, or the guest pays us at the property. Check the OTA email: “prepaid” or “channel collect” means the OTA.
 - Rooms are tiles. Grey means taken, and the tile says by whom. Tap a free tile to add it at tariff; change the rate on the tile if agreed. The strip below shows room total, GST and gross, and whether the booking approves itself or goes to the revenue desk.
 - On-tariff bookings approve themselves. Below tariff goes to Trupti; you will see "awaiting approval" and the booking is provisional until she decides.
 - **Amend**: open the booking, press Amend, change rooms, dates, rate, guest or channel, and write a remark saying why. It is audited and the front desk is told. Use this for a room exchange or a wrong OTA mapping.
@@ -126,7 +128,7 @@ Change a booking's rooms or rate (ask sales), record bank expenses, see P&L or s
 
 ### Revenue overview and pre-close
 - Revenue by channel, direct share, OTA clearing for the month.
-- Before the CA locks a month, the **Pre-close** card lists the exceptions: unreconciled bank lines, part-paid stays, expenses missing bill details, pending approvals, unsettled OTA stays, uninvoiced direct stays, stays not checked out. Clear them, or **Carry exceptions & clear** with a note, then **Approve for close**.
+- Before the CA locks a month, the **Pre-close** card lists the exceptions: unreconciled bank lines, part-paid stays, expenses missing bill details, pending approvals, unsettled OTA stays, uninvoiced direct stays, stays not checked out. Each one says what it means, names the first few stays or bills, and has a button that opens the screen where it is fixed. Items marked **must be fixed** (approvals waiting, guests still checked in after their stay, direct stays without an invoice) block the close; the rest can be carried. Fix them, or press **Carry the rest with a note**, then **Hand to the accountant**.
 
 ### Marketing scorecard
 - Leads by month and source, how fast sales answered, how many booked, revenue against marketing spend, cost per lead and per booking, by campaign. This is how the agency is measured.
@@ -147,13 +149,16 @@ Record expenses, lock a month, change settings or see P&L.
 | GST not filed | by the 15th | GST filing sheet → file → mark filed |
 
 ### Month close
-1. Revenue desk clears the pre-close exceptions and approves the month for close. You see the same list on Month close.
+The top of the screen shows the month's three steps (pre-close, lock, GST filed), who does each, and which one the month is on.
+
+1. Revenue desk clears the pre-close checks and hands the month to you. You see the same checklist on Month close.
 2. **Lock** the month. From then on nobody, including the owner, can post into it; a correction goes into the current month with a note.
 3. The close pack (summary and registers as CSV: bookings, payments, expenses, other income, transfers between accounts, invoices, credit notes, bank lines, OTA settlements) is kept for the month and can be downloaded.
 
 ### GST filing sheet
 - Taxable value by slab (nil up to ₹1,000 per room-night, 5% up to ₹7,500, 18% above), output GST, TCS to accept from the OTAs, TDS for 26AS, credit notes and advances. Everything is computed from the books; nothing is typed in.
-- Mark the month **filed** when done.
+- The top row shows output GST payable, the taxable value and the filing status. Once the month is locked, **Mark filed** appears there; press it after filing.
+- **Corrections in the month** counts records edited or voided after they were made; open the Change log to review them before filing.
 
 ### Change log
 - Every change in AVOS with who, when, before and after. Filter by month; 100 rows at a time.

@@ -11,6 +11,21 @@ export function inr(p: number | null | undefined, opts: { symbol?: boolean } = {
 export function inrShort(p: number | null | undefined): string { if (p === null || p === undefined) return "—"; return `₹ ${Math.round(p / 100).toLocaleString("en-IN")}`; }
 export const fmtDate = (s: string | null | undefined) => { if (!s) return "—"; const [y, m, d] = s.slice(0, 10).split("-"); return `${d} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(m) - 1]} ${y}`; };
 export const fmtDateTime = (s: string | null | undefined) => { if (!s) return "—"; const d = new Date(s.includes("T") ? s : s.replace(" ", "T") + "Z"); return d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
+/** A stay as one compact range: "24–26 Oct 2026", "30 Oct – 1 Nov 2026", "30 Dec 2026 – 2 Jan 2027". */
+export const fmtRange = (a: string, b: string) => {
+  const M = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const [ya, ma, da] = a.slice(0, 10).split("-").map(Number); const [yb, mb, db] = b.slice(0, 10).split("-").map(Number);
+  if (ya !== yb) return `${da} ${M[ma - 1]} ${ya} – ${db} ${M[mb - 1]} ${yb}`;
+  if (ma !== mb) return `${da} ${M[ma - 1]} – ${db} ${M[mb - 1]} ${yb}`;
+  return `${da}–${db} ${M[mb - 1]} ${yb}`;
+};
+/** An audit action as words: "expense.update" → "Expense updated", "booking.check_in" → "Booking check in". */
+export const actionLabel = (action: string) => {
+  const [what, ...rest] = String(action).split(".");
+  const verb = rest.join(" ").replace(/_/g, " ");
+  const past: Record<string, string> = { create: "created", update: "updated", delete: "deleted", void: "voided", amend: "amended", cancel: "cancelled", approve: "approved", return: "returned", lock: "locked", unlock: "unlocked", file: "filed", undo: "undone", accept: "accepted", match: "matched", carry: "carried forward", preclear: "pre-close cleared", merge: "merged", restore: "restored" };
+  return `${what.charAt(0).toUpperCase()}${what.slice(1).replace(/_/g, " ")}${verb ? ` ${past[verb] ?? verb}` : ""}`;
+};
 export const ago = (s: string) => { const ms = Date.now() - new Date(s.includes("T") ? s : s.replace(" ", "T") + "Z").getTime(); const m = Math.floor(ms / 60000); if (m < 60) return `${m} min`; const h = Math.floor(m / 60); if (h < 48) return `${h} h`; return `${Math.floor(h / 24)} d`; };
 export const todayIso = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 export const thisPeriod = () => todayIso().slice(0, 7);
@@ -28,8 +43,8 @@ export function Btn(p: { onClick?: () => unknown | Promise<unknown>; children?: 
 export function Chip(p: { on?: boolean; onClick?: () => void; children?: ComponentChildren; tone?: "ok" | "amb" | "bad" | "muted" }) {
   return <button type="button" aria-pressed={!!p.on} className={`chip ${p.on ? "on" : ""} ${p.tone ?? ""}`} onClick={p.onClick}>{p.children}</button>;
 }
-export function Chips<T extends string>(p: { value: T | null; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
-  return <div className="chips">{p.options.map((o) => <Chip key={o.value} on={p.value === o.value} onClick={() => p.onChange(o.value)}>{o.label}</Chip>)}</div>;
+export function Chips<T extends string>(p: { value: T | null; options: { value: T; label: string }[]; onChange: (v: T) => void; label?: string }) {
+  return <div className="chips" role="group" aria-label={p.label}>{p.options.map((o) => <Chip key={o.value} on={p.value === o.value} onClick={() => p.onChange(o.value)}>{o.label}</Chip>)}</div>;
 }
 /** Which bank: hidden when there is only one; the default bank is preselected. */
 export function BankPick({ accounts, value, onChange, label = "Bank" }: { accounts: any[]; value: string; onChange: (id: string) => void; label?: ComponentChildren }) {
@@ -84,6 +99,38 @@ export const askConfirm = async (title: string, body?: ComponentChildren, o: { o
 export const askText = async (title: string, label = "Reason", o: Partial<AskOpts> & { minLength?: number } = {}) => { const v = await ask({ title, ok: "Save", ...o, input: { label, minLength: o.minLength, ...o.input } }); return v && v.trim() ? v.trim() : null; };
 export const tell = (title: string, body?: ComponentChildren) => ask({ title, body, ok: "OK", cancel: null }).then(() => undefined);
 
+/** Keyboard inside a modal: Esc closes, Tab and Shift+Tab stay inside. */
+function trapKeys(e: { key: string; shiftKey: boolean; preventDefault(): void }, box: HTMLElement | null, onEscape: () => void) {
+  if (e.key === "Escape") { e.preventDefault(); onEscape(); return; }
+  if (e.key !== "Tab" || !box) return;
+  const f = [...box.querySelectorAll<HTMLElement>("a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled]),summary,[tabindex='0']")].filter((el) => el.offsetParent !== null);
+  if (!f.length) return;
+  const i = f.indexOf(document.activeElement as HTMLElement);
+  if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
+}
+
+/**
+ * Side panel for one task (a new booking, one booking's detail): slides in over the list, so the list keeps its
+ * place. Labelled, keyboard-trapped, Esc or the backdrop closes it, focus returns to what opened it.
+ */
+export function Drawer(p: { title: ComponentChildren; sub?: ComponentChildren; onClose: () => void; children?: ComponentChildren; footer?: ComponentChildren; wide?: boolean }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const back = document.activeElement as HTMLElement | null;
+    box.current?.querySelector<HTMLElement>(".drawer-close")?.focus();
+    document.body.classList.add("noscroll");
+    return () => { document.body.classList.remove("noscroll"); if (back?.isConnected) setTimeout(() => back.focus(), 0); };
+  }, []);
+  return <>
+    <button type="button" className="drawer-backdrop" tabIndex={-1} aria-hidden="true" onClick={p.onClose} />
+    <div ref={box} className={`drawer ${p.wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby="drawer-title" onKeyDown={(e) => trapKeys(e, box.current, p.onClose)}>
+      <header><div><h2 id="drawer-title">{p.title}</h2>{p.sub && <div className="sub">{p.sub}</div>}</div><button type="button" className="btn small drawer-close" aria-label="Close" onClick={p.onClose}>✕</button></header>
+      <div className="body">{p.children}</div>
+      {p.footer && <footer>{p.footer}</footer>}
+    </div>
+  </>;
+}
+
 function DialogHost() {
   const [d, setD] = useState<(AskOpts & { resolve: (v: string | null) => void; back: Element | null }) | null>(null);
   const [val, setVal] = useState("");
@@ -94,14 +141,7 @@ function DialogHost() {
   const done = (v: string | null) => { const back = d.back as HTMLElement | null; d.resolve(v); setD(null); setTimeout(() => { if (back?.isConnected) back.focus(); }, 60); }; // after the opening button stops being busy
   const short = !!d.input && !d.input.readOnly && val.trim().length < Math.max(1, d.input.minLength ?? 1);
   const submit = (e?: { preventDefault(): void }) => { e?.preventDefault(); if (!short) done(d.input ? val : ""); };
-  const keys = (e: any) => {
-    if (e.key === "Escape") { e.preventDefault(); done(null); return; }
-    if (e.key !== "Tab") return;
-    const f = [...(box.current?.querySelectorAll<HTMLElement>("input,textarea,button:not([disabled])") ?? [])];
-    if (!f.length) return;
-    const i = f.indexOf(document.activeElement as HTMLElement);
-    if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
-  };
+  const keys = (e: any) => trapKeys(e, box.current, () => done(null));
   return <div className="dlg-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget && d.cancel !== null) done(null); }}>
     <div className="dlg" ref={box} role={d.danger ? "alertdialog" : "dialog"} aria-modal="true" aria-labelledby="dlg-title" aria-describedby={d.body ? "dlg-body" : undefined} onKeyDown={keys}>
       <form onSubmit={submit}>
