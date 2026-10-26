@@ -79,3 +79,17 @@ describe("Audit fixes", () => {
     expect(await work("trupti")).toMatch(/Airpay clearing holds ₹100/);
   });
 });
+
+describe("Invoices for OTA-collected stays", () => {
+  beforeAll(seed);
+  it("show the stay paid through the OTA, with nothing due from the guest", async () => {
+    const ci = addDays(todayIn("Asia/Kolkata"), -2), co = addDays(todayIn("Asia/Kolkata"), -1);
+    const b = await ok("shaji", "POST", "/api/bookings", { guest_name: "OTA Invoice", guest_phone: "9500000501", channel_code: "agoda", check_in: ci, check_out: co, rooms: [{ room_id: "loc_r3", nightly_rate_paise: 525938 }] });
+    await ok("sindhu", "POST", `/api/bookings/${b.booking.id}/check-in`, { arrived_at: `${ci}T14:00:00+05:30` });
+    await ok("sindhu", "POST", `/api/bookings/${b.booking.id}/check-out`, { departed_at: `${co}T11:00:00+05:30` });
+    const inv = await ok("sindhu", "POST", `/api/invoices/bookings/${b.booking.id}`);
+    expect(inv.balance_paise).toBe(0); expect(inv.received_paise).toBe(inv.total_paise);
+    const html = await api("sindhu", "GET", `/api/invoices/${inv.id}/html`);
+    expect(String(html.json.raw ?? html.json)).toContain("Paid through Agoda");
+  });
+});

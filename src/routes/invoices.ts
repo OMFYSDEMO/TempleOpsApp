@@ -33,7 +33,9 @@ r.post("/bookings/:id", async (c) => {
   const taxable = lines.reduce((a, l) => a + l.taxable_paise, 0);
   const gst = lines.reduce((a, l) => a + l.gst_paise, 0);
   const total = taxable + gst;
-  const received = await paidOnBooking(c.env.DB, bk.id);
+  // The guest of an OTA-collected stay paid the OTA in full: the invoice shows it paid through the OTA, nothing due.
+  const channel = await one<{ name: string; collection_type: string }>(c.env.DB, "SELECT name, collection_type FROM channels WHERE id = ?", bk.channel_id);
+  const received = channel?.collection_type === "channel_collect" ? total : await paidOnBooking(c.env.DB, bk.id);
   const { fy, seq } = await nextSequence(c.env.DB, p.id, "invoice", issuedOn, p.fy_start_month);
   const number = `${p.invoice_prefix}/${fy}/${String(seq).padStart(3, "0")}`;
   const iid = id("inv");
@@ -70,6 +72,8 @@ r.get("/:id/html", async (c) => {
   const lines: InvoiceLine[] = JSON.parse(inv.lines_json);
   const payments = await all<any>(c.env.DB, "SELECT method, amount_paise, reference, received_on, kind FROM payments WHERE booking_id = ? AND status != 'void' ORDER BY received_on", inv.booking_id);
   const cns = await all<any>(c.env.DB, "SELECT number, total_paise, reason FROM credit_notes WHERE invoice_id = ?", inv.id);
+  const ch = await one<{ name: string; collection_type: string }>(c.env.DB, "SELECT ch.name, ch.collection_type FROM bookings b JOIN channels ch ON ch.id = b.channel_id WHERE b.id = ?", inv.booking_id);
+  const viaOta = ch?.collection_type === "channel_collect";
   const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]!));
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(inv.number)}</title>
 <style>body{font:14px/1.45 -apple-system,Segoe UI,sans-serif;color:#1C2420;margin:32px;max-width:720px}h1{font-size:20px;margin:0 0 4px}.muted{color:#5a615c}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #DDD8CB}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}.tot td{font-weight:700;border-top:2px solid #14453A}.hdr{display:flex;justify-content:space-between;gap:24px}.box{border:1px solid #DDD8CB;padding:12px;border-radius:8px}@media print{body{margin:12mm}}</style></head><body>
@@ -79,7 +83,8 @@ r.get("/:id/html", async (c) => {
 <table><thead><tr><th>Description</th><th class="n">Taxable</th>${inv.gst_applicable ? '<th class="n">GST</th>' : ""}<th class="n">Amount</th></tr></thead><tbody>
 ${lines.map((l) => `<tr><td>${esc(l.description)}${inv.gst_applicable ? ` <span class="muted">(SAC 9963 · ${l.gst_rate_bp / 100}%)</span>` : ""}</td><td class="n">${formatINR(l.taxable_paise)}</td>${inv.gst_applicable ? `<td class="n">${formatINR(l.gst_paise)}</td>` : ""}<td class="n">${formatINR(l.taxable_paise + l.gst_paise)}</td></tr>`).join("")}
 <tr class="tot"><td>Total</td><td class="n">${formatINR(inv.taxable_paise)}</td>${inv.gst_applicable ? `<td class="n">${formatINR(inv.gst_paise)}</td>` : ""}<td class="n">${formatINR(inv.total_paise)}</td></tr>
-${payments.map((pm) => `<tr><td>${pm.kind === "refund" ? "Refunded" : "Received"} · ${esc(pm.method)}${pm.reference ? " ····" + esc(String(pm.reference).slice(-4)) : ""} · ${esc(pm.received_on)}</td><td></td>${inv.gst_applicable ? "<td></td>" : ""}<td class="n">${pm.kind === "refund" ? "" : "− "}${formatINR(pm.amount_paise)}</td></tr>`).join("")}
+${viaOta ? `<tr><td>Paid through ${esc(ch!.name)}</td><td></td>${inv.gst_applicable ? "<td></td>" : ""}<td class="n">${formatINR(inv.total_paise)}</td></tr>` : ""}
+${(viaOta ? payments.filter((pm) => pm.method !== "ota") : payments).map((pm) => `<tr><td>${pm.kind === "refund" ? "Refunded" : "Received"} · ${esc(pm.method)}${pm.reference ? " ····" + esc(String(pm.reference).slice(-4)) : ""} · ${esc(pm.received_on)}</td><td></td>${inv.gst_applicable ? "<td></td>" : ""}<td class="n">${pm.kind === "refund" ? "" : "− "}${formatINR(pm.amount_paise)}</td></tr>`).join("")}
 ${cns.map((cn) => `<tr><td>Credit note ${esc(cn.number)} · ${esc(cn.reason)}</td><td></td>${inv.gst_applicable ? "<td></td>" : ""}<td class="n">− ${formatINR(cn.total_paise)}</td></tr>`).join("")}
 <tr class="tot"><td>Balance due</td><td></td>${inv.gst_applicable ? "<td></td>" : ""}<td class="n">${formatINR(inv.balance_paise)}</td></tr></tbody></table>
 <p class="muted">Thank you for staying with us.</p></body></html>`;
