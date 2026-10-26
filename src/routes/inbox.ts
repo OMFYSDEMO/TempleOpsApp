@@ -96,6 +96,21 @@ async function initialStatus(env: Env, propertyId: string, parsed: ParsedEmail, 
   return parsed.kind === "payment" || parsed.kind === "bank_alert" ? "routed" : "pending";
 }
 
+/**
+ * Mail our own staff wrote (a quote, a reply to a guest) that reaches the inbox because a mailbox copied or forwarded
+ * it: sent from an address that is one of this property's AVOS logins, not itself a forward, and not a notification
+ * AVOS can read. It is filed as dismissed with the reason, so it never waits for a person. A forwarded email is kept:
+ * that is how staff hand AVOS something on purpose.
+ */
+async function ownMailNote(env: Env, propertyId: string, from: string, subject: string, html: string | undefined, text: string | undefined, parsed: ParsedEmail): Promise<string | null> {
+  if (parsed.source !== "unknown") return null;
+  const addr = (from.match(/<([^>]+)>/)?.[1] ?? from).trim().toLowerCase();
+  if (!addr) return null;
+  if (/^\s*(?:fwd?|fw)\s*:/i.test(subject) || /Forwarded message|Original Message|Begin forwarded message/i.test(`${text ?? ""}\n${html ?? ""}`)) return null;
+  const own = await one(env.DB, "SELECT id FROM users WHERE property_id = ? AND lower(email) = ?", propertyId, addr);
+  return own ? `sent from our own mailbox (${addr}), not a booking or payment notification` : null;
+}
+
 /** Run automation on a stored item and return the outcome plus the row as it now stands. */
 async function applyAutomation(env: Env, propertyId: string, iid: string, status: string, parsed: ParsedEmail, subject: string) {
   const property = await loadProperty(env.DB, propertyId);
@@ -116,12 +131,13 @@ export async function ingestEmail(env: Env, propertyId: string, msg: { message_i
   let rawKey: string | null = null;
   if (msg.raw) { rawKey = `inbox/${propertyId}/${iid}.eml`; await env.FILES.put(rawKey, msg.raw, { httpMetadata: { contentType: "message/rfc822" } }); }
   else if (msg.text || msg.html) { rawKey = `inbox/${propertyId}/${iid}.txt`; await env.FILES.put(rawKey, JSON.stringify({ from: msg.from, subject: msg.subject, text: msg.text ?? null, html: msg.html ?? null }), { httpMetadata: { contentType: "application/json" } }); }
-  const status = await initialStatus(env, propertyId, parsed);
+  const own = await ownMailNote(env, propertyId, msg.from, msg.subject, msg.html, msg.text, parsed);
+  const status = own ? "dismissed" : await initialStatus(env, propertyId, parsed);
   const b = new Batch(env.DB, null);
-  b.add(`INSERT INTO inbox_items (id, property_id, source, kind, message_id, from_addr, subject, received_at, raw_key, parsed_json, parser_version, external_ref, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    iid, propertyId, parsed.source, parsed.kind, msg.message_id, msg.from, msg.subject, msg.received_at ?? nowIso(), rawKey, JSON.stringify({ ...parsed.data, confidence: parsed.confidence }), PARSER_VERSION, parsed.external_ref, status);
-  b.audit("inbox.ingest", "inbox_item", iid, null, { source: parsed.source, kind: parsed.kind, status, confidence: parsed.confidence });
+  b.add(`INSERT INTO inbox_items (id, property_id, source, kind, message_id, from_addr, subject, received_at, raw_key, parsed_json, parser_version, external_ref, status, auto_note)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    iid, propertyId, parsed.source, parsed.kind, msg.message_id, msg.from, msg.subject, msg.received_at ?? nowIso(), rawKey, JSON.stringify({ ...parsed.data, confidence: parsed.confidence }), PARSER_VERSION, parsed.external_ref, status, own);
+  b.audit("inbox.ingest", "inbox_item", iid, null, { source: parsed.source, kind: parsed.kind, status, confidence: parsed.confidence, ...(own ? { reason: own } : {}) });
   await b.run();
   return applyAutomation(env, propertyId, iid, status, parsed, msg.subject);
 }
@@ -140,10 +156,11 @@ export async function reparseItem(env: Env, propertyId: string, itemId: string, 
   else if (obj) { const j = JSON.parse(await obj.text()); from = j.from ?? from; subject = j.subject ?? subject; text = j.text ?? undefined; html = j.html ?? undefined; }
   else { const d = JSON.parse(item.parsed_json ?? "{}"); text = d.preview ?? ""; }
   const parsed = parseInboundEmail(from, subject, html, text);
-  const status = await initialStatus(env, propertyId, parsed, { id: item.id, received_at: item.received_at });
+  const own = await ownMailNote(env, propertyId, from, subject, html, text, parsed);
+  const status = own ? "dismissed" : await initialStatus(env, propertyId, parsed, { id: item.id, received_at: item.received_at });
   const b = new Batch(env.DB, null);
-  b.add("UPDATE inbox_items SET source = ?, kind = ?, parsed_json = ?, parser_version = ?, external_ref = ?, status = ?, auto_note = NULL WHERE id = ?",
-    parsed.source, parsed.kind, JSON.stringify({ ...parsed.data, confidence: parsed.confidence }), PARSER_VERSION, parsed.external_ref, status, item.id);
+  b.add("UPDATE inbox_items SET source = ?, kind = ?, parsed_json = ?, parser_version = ?, external_ref = ?, status = ?, auto_note = ? WHERE id = ?",
+    parsed.source, parsed.kind, JSON.stringify({ ...parsed.data, confidence: parsed.confidence }), PARSER_VERSION, parsed.external_ref, status, own, item.id);
   b.audit("inbox.reparse", "inbox_item", item.id, { source: item.source, kind: item.kind, parser_version: item.parser_version }, { source: parsed.source, kind: parsed.kind, parser_version: PARSER_VERSION, by: actorId ?? "cron" });
   await b.run();
   return applyAutomation(env, propertyId, item.id, status, parsed, subject);

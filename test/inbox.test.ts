@@ -145,6 +145,20 @@ describe("Inbox automation", () => {
     expect((await sql("SELECT status FROM bookings WHERE id = ?", r.booking.id))[0].status).toBe("cancelled");
   });
 
+  it("files our own staff's mail as dismissed, but keeps what they forward on purpose", async () => {
+    // A quote the sales desk sent from bookings@ that a mailbox copied to AVOS: not something to act on.
+    const quote = "Dear Sir/Maam,\n\nGreetings from The Meadows Varkala!!\n\nFollowing your query for a 9th Dec check-in and 13th Dec check-out, I can offer you a Premium Room @ 5500+Taxes per night.\n\nKind Regards,\nSales & Reservations";
+    const own = await ok("prachi", "POST", "/api/inbox/ingest", { from: "Bookings <bookings@meadowsvarkala.com>", subject: "Booking Query- Meadows Varkala-9th-13thDec", text: quote });
+    expect(own.status).toBe("dismissed");
+    expect((await sql("SELECT auto_note FROM inbox_items WHERE id = ?", own.id))[0].auto_note).toMatch(/own mailbox/);
+    // The same address forwarding something it wants AVOS to see: kept for a person.
+    const fwd = await ok("prachi", "POST", "/api/inbox/ingest", { from: "bookings@meadowsvarkala.com", subject: "Fwd: room request from a guest", text: "---------- Forwarded message ---------\nFrom: guest@example.com\nCan we book two rooms in March?" });
+    expect(fwd.status).toBe("pending");
+    // An outsider's email AVOS cannot read still waits for a person.
+    const other = await ok("prachi", "POST", "/api/inbox/ingest", { from: "guest@example.com", subject: "Booking Query", text: quote });
+    expect(other.status).toBe("pending");
+  });
+
   it("does nothing on its own when the owner switches automation off", async () => {
     await ok("shaji", "PATCH", "/api/admin/property", { inbox_automation: false });
     const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@staah.com", subject: "STAAH · New reservation · Agoda", text: "Channel: Agoda\nRef: 7000000000000009\nGuest: Lina P\nRoom: Executive ×1\nCheck-in: 05/01/2027\nCheck-out: 06/01/2027\nRoom Total: ₹5,000.00 (ex-GST)" });
