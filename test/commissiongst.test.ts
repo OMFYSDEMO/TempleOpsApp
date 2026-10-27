@@ -27,6 +27,16 @@ describe("GST on OTA commission", () => {
     expect(exp).toEqual({ amount_paise: 212400, gst_rate_bp: 1800, gst_paise: 32400 });
   });
 
+  it("refuses a payout received before the bank's opening balance, which already holds it", async () => {
+    await sql("UPDATE money_accounts SET opening_date = '2027-08-15' WHERE id = 'acc_bank'");
+    const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Old Payout Guest", guest_phone: "9500000083", channel_code: "agoda", external_ref: "AG-777003", check_in: "2027-08-01", check_out: "2027-08-02", rooms: [{ room_id: "loc_r1", nightly_rate_paise: 1000000 }] });
+    const s = await ok("trupti", "POST", "/api/settlements", { channel_code: "agoda", booking_ids: [b.booking.id], payout_ref: "AGODA-OLD-2", payout_on: "2027-08-10" });
+    const r = await api("trupti", "POST", `/api/settlements/${s.id}/settle`, { account_id: "acc_bank" });
+    expect(r.status).toBe(409);
+    expect((await sql("SELECT status FROM settlements WHERE id = ?", s.id))[0].status).toBe("draft");
+    await sql("UPDATE money_accounts SET opening_date = '2026-09-01' WHERE id = 'acc_bank'");
+  });
+
   it("refuses a payout dated before a stay it is said to cover", async () => {
     const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Later Guest", guest_phone: "9500000082", channel_code: "agoda", external_ref: "AG-777002", check_in: "2027-09-10", check_out: "2027-09-11", rooms: [{ room_id: "loc_r4", nightly_rate_paise: 1000000 }] });
     const r = await api("trupti", "POST", "/api/settlements", { channel_code: "agoda", booking_ids: [b.booking.id], payout_ref: "AGODA-OLD-1", payout_on: "2027-08-29" });

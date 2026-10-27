@@ -86,6 +86,8 @@ r.post("/:id/settle", async (c) => {
   const received = x.received_paise !== undefined ? paise(x.received_paise, "received_paise", { allowZero: true }) : s.received_paise ?? s.expected_paise;
   const variance = received - s.expected_paise;
   const bank = x.account_id ? await bankAccount(c.env.DB, p.id, str(x.account_id, "account_id")) : await defaultBank(c.env.DB, p.id);
+  // The bank's opening balance already holds everything received before it was taken: adding an older payout counts it twice.
+  if (bank.opening_date && onDate < bank.opening_date) throw new HttpError(409, `${bank.name}'s balance in AVOS starts from the bank's own figure on ${bank.opening_date}, which already includes a payout received on ${onDate}: it cannot be added again. Leave these stays for the owner to close against the opening balance.`);
   const items = await all<any>(c.env.DB, "SELECT si.*, b.guest_id FROM settlement_items si JOIN bookings b ON b.id = si.booking_id WHERE si.settlement_id = ?", s.id);
   const now = nowIso();
   const b = new Batch(c.env.DB, actor);

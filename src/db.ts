@@ -83,15 +83,15 @@ export async function nextSequence(db: D1Database, propertyId: string, name: str
 export function id(prefix: string) { return newId(prefix); }
 
 /** The bank that receives money when nobody picks one: the account marked default, else the first active bank. */
-export async function defaultBank(db: D1Database, propertyId: string): Promise<{ id: string; name: string }> {
-  const a = await one<{ id: string; name: string }>(db, "SELECT id, name FROM money_accounts WHERE property_id = ? AND kind = 'bank' AND active = 1 ORDER BY is_default DESC, id LIMIT 1", propertyId);
+export async function defaultBank(db: D1Database, propertyId: string): Promise<{ id: string; name: string; opening_date: string | null }> {
+  const a = await one<{ id: string; name: string; opening_date: string | null }>(db, "SELECT id, name, opening_date FROM money_accounts WHERE property_id = ? AND kind = 'bank' AND active = 1 ORDER BY is_default DESC, id LIMIT 1", propertyId);
   if (!a) throw new HttpError(400, "no bank account configured");
   return a;
 }
 
 /** A bank account the caller named, checked to belong to the property and be active. */
-export async function bankAccount(db: D1Database, propertyId: string, accountId: string): Promise<{ id: string; name: string }> {
-  const a = await one<{ id: string; name: string }>(db, "SELECT id, name FROM money_accounts WHERE id = ? AND property_id = ? AND kind = 'bank' AND active = 1", accountId, propertyId);
+export async function bankAccount(db: D1Database, propertyId: string, accountId: string): Promise<{ id: string; name: string; opening_date: string | null }> {
+  const a = await one<{ id: string; name: string; opening_date: string | null }>(db, "SELECT id, name, opening_date FROM money_accounts WHERE id = ? AND property_id = ? AND kind = 'bank' AND active = 1", accountId, propertyId);
   if (!a) throw new HttpError(400, "unknown or inactive bank account");
   return a;
 }
