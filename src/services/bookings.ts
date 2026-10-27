@@ -8,7 +8,7 @@ import { notifyRole } from "./notify";
 
 export interface ChannelRow {
   id: string; code: string; name: string; collection_type: "direct" | "channel_collect" | "hotel_collect";
-  commission_bp: number; commission_base: "ex_gst" | "gross"; payment_fee_bp: number; payment_fee_base: "ex_gst" | "gross";
+  commission_bp: number; commission_base: "ex_gst" | "gross"; commission_gst_bp?: number; payment_fee_bp: number; payment_fee_base: "ex_gst" | "gross";
   tcs_bp: number; tcs_base: "ex_gst" | "gross"; tds_bp: number; tds_base: "ex_gst" | "gross";
 }
 

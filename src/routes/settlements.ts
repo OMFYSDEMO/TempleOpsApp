@@ -47,12 +47,12 @@ r.post("/", async (c) => {
   const received = x.received_paise !== undefined ? paise(x.received_paise, "received_paise", { allowZero: true }) : null;
   const sid = id("stl");
   const b = new Batch(c.env.DB, actor);
-  b.add(`INSERT INTO settlements (id, property_id, channel_id, payout_ref, payout_on, gross_paise, commission_paise, payment_fee_paise, tcs_paise, tds_paise, expected_paise, received_paise, variance_paise, status, created_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?)`,
-    sid, p.id, ch.id, payoutRef, optStr(x.payout_on, "payout_on"), calc.grossPaise, calc.commissionPaise, calc.paymentFeePaise, calc.tcsPaise, calc.tdsPaise, calc.expectedPaise, received, received === null ? 0 : received - calc.expectedPaise, actor.id);
-  for (const it of calc.items) b.add("INSERT INTO settlement_items (settlement_id, booking_id, gross_paise, commission_paise, payment_fee_paise, tcs_paise, tds_paise, net_paise) VALUES (?,?,?,?,?,?,?,?)",
-    sid, it.bookingId, it.grossPaise, it.commissionPaise, it.paymentFeePaise, it.tcsPaise, it.tdsPaise, it.netPaise);
-  b.audit("settlement.create", "settlement", sid, null, { payout_ref: payoutRef, expected_paise: calc.expectedPaise, received_paise: received, terms: { commission_bp: terms.commission_bp, payment_fee_bp: terms.payment_fee_bp, tcs_bp: terms.tcs_bp, tds_bp: terms.tds_bp } });
+  b.add(`INSERT INTO settlements (id, property_id, channel_id, payout_ref, payout_on, gross_paise, commission_paise, commission_gst_paise, payment_fee_paise, tcs_paise, tds_paise, expected_paise, received_paise, variance_paise, status, created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?)`,
+    sid, p.id, ch.id, payoutRef, optStr(x.payout_on, "payout_on"), calc.grossPaise, calc.commissionPaise, calc.commissionGstPaise, calc.paymentFeePaise, calc.tcsPaise, calc.tdsPaise, calc.expectedPaise, received, received === null ? 0 : received - calc.expectedPaise, actor.id);
+  for (const it of calc.items) b.add("INSERT INTO settlement_items (settlement_id, booking_id, gross_paise, commission_paise, commission_gst_paise, payment_fee_paise, tcs_paise, tds_paise, net_paise) VALUES (?,?,?,?,?,?,?,?,?)",
+    sid, it.bookingId, it.grossPaise, it.commissionPaise, it.commissionGstPaise, it.paymentFeePaise, it.tcsPaise, it.tdsPaise, it.netPaise);
+  b.audit("settlement.create", "settlement", sid, null, { payout_ref: payoutRef, expected_paise: calc.expectedPaise, received_paise: received, terms: { commission_bp: terms.commission_bp, commission_gst_bp: terms.commission_gst_bp ?? 0, payment_fee_bp: terms.payment_fee_bp, tcs_bp: terms.tcs_bp, tds_bp: terms.tds_bp } });
   await b.run();
   return c.json({ id: sid, ...calc, received_paise: received, variance_paise: received === null ? 0 : received - calc.expectedPaise }, 201);
 });
@@ -86,9 +86,11 @@ r.post("/:id/settle", async (c) => {
   const now = nowIso();
   const b = new Batch(c.env.DB, actor);
   const created: string[] = [];
-  const exp = (kind: string, amount: number, desc: string) => { if (amount === 0) return; const eid = id("exp"); created.push(eid);
-    b.add("INSERT INTO expenses (id, property_id, kind, category, description, amount_paise, gst_rate_bp, gst_paise, paid_from_account_id, on_date, settlement_id, recorded_by) VALUES (?,?,?,?,?,?,0,0,?,?,?,?)", eid, p.id, kind, "bank_charges", desc, amount, bank.id, onDate, s.id, actor.id); };
-  exp("ota_commission", s.commission_paise, `${s.channel_name} commission · payout ${s.payout_ref}`);
+  const exp = (kind: string, amount: number, desc: string, gst = { bp: 0, paise: 0 }) => { if (amount === 0) return; const eid = id("exp"); created.push(eid);
+    b.add("INSERT INTO expenses (id, property_id, kind, category, description, amount_paise, gst_rate_bp, gst_paise, paid_from_account_id, on_date, settlement_id, recorded_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", eid, p.id, kind, "bank_charges", desc, amount, gst.bp, gst.paise, bank.id, onDate, s.id, actor.id); };
+  // The commission expense carries the OTA's GST on it (input GST for the register), as on the OTA's commission invoice.
+  const cgst = Number(s.commission_gst_paise ?? 0);
+  exp("ota_commission", s.commission_paise + cgst, `${s.channel_name} commission${cgst ? " incl. GST" : ""} · payout ${s.payout_ref}`, cgst ? { bp: s.commission_paise ? Math.round((cgst * 10000) / s.commission_paise) : 0, paise: cgst } : undefined);
   exp("ota_payment_fee", s.payment_fee_paise, `${s.channel_name} payment fee · payout ${s.payout_ref}`);
   if (variance !== 0) exp("fee_variance", -variance, `${s.channel_name} payout variance · ${s.payout_ref}`); // short receipt is a cost; excess a negative cost
   for (const k of ["tcs", "tds"] as const) if (s[`${k}_paise`] > 0)

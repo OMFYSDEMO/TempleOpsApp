@@ -137,6 +137,18 @@ describe("settlement — the acceptance test", () => {
   });
 });
 
+describe("GST on OTA commission", () => {
+  it("comes off the payout on top of the commission, per stay", () => {
+    const terms = { commission_bp: 2300, commission_base: "ex_gst" as const, commission_gst_bp: 1800, payment_fee_bp: 0, payment_fee_base: "gross" as const, tcs_bp: 0, tcs_base: "ex_gst" as const, tds_bp: 0, tds_base: "gross" as const };
+    const s = computeSettlement(terms, [{ bookingId: "a", roomTotalPaise: 1000000, gstPaise: 50000 }, { bookingId: "b", roomTotalPaise: 333333, gstPaise: 16667 }]);
+    expect(s.items.map((i) => i.commissionGstPaise)).toEqual([41400, 13800]); // 18% of 2,300.00 and of 766.67
+    expect(s.commissionGstPaise).toBe(55200);
+    expect(s.expectedPaise).toBe(1400000 - s.commissionPaise - 55200);
+    // Without the setting nothing changes.
+    expect(computeSettlement({ ...terms, commission_gst_bp: 0 }, [{ bookingId: "a", roomTotalPaise: 1000000, gstPaise: 50000 }]).commissionGstPaise).toBe(0);
+  });
+});
+
 describe("reconcile", () => {
   it("parses a pasted statement in debit/credit and single-amount forms", () => {
     const text = [
