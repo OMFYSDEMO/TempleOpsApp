@@ -22,7 +22,7 @@ export function Approvals({ me, refs }: { me: Me; refs: Ref }) {
   </>;
 }
 
-export function Payouts({ refs }: { me: Me; refs: Ref }) {
+export function Payouts({ me, refs }: { me: Me; refs: Ref }) {
   const otaChannels = refs.channels.filter((c) => c.collection_type === "channel_collect");
   const [channel, setChannel] = useState(otaChannels[0]?.code ?? "booking_com");
   const un = useLoad(() => get(`/settlements/unsettled?channel=${channel}`), [channel]);
@@ -33,7 +33,19 @@ export function Payouts({ refs }: { me: Me; refs: Ref }) {
   const detail = useLoad(() => open ? get(`/settlements/${open}`) : Promise.resolve(null), [open]);
   const doPreview = () => run(async () => setPreview((await post("/settlements", { channel_code: channel, booking_ids: sel, preview: true })).preview));
   const create = () => run(async () => { const s = await post("/settlements", { channel_code: channel, booking_ids: sel, payout_ref: refn, payout_on: on || null, received_paise: recv ? Math.round(Number(recv) * 100) : undefined }); setSel([]); setPreview(null); setRefn(""); await Promise.all([un.reload(), list.reload()]); setOpen(s.id); }, "Settlement drafted · nothing posted yet");
-  const settle = (id: string) => run(async () => { await post(`/settlements/${id}/settle`, { account_id: bankId || undefined }); await Promise.all([list.reload(), un.reload(), detail.reload()]); }, "Settled · commission & fee posted once, stays settled");
+  // A payout received before the bank's opening balance is already in it: the owner closes it against the opening instead.
+  const settle = async (id: string) => {
+    const go = (extra: object = {}) => post(`/settlements/${id}/settle`, { account_id: bankId || undefined, ...extra });
+    try { await go(); toast("Settled · commission & fee posted once, stays settled"); }
+    catch (e: any) {
+      if (!e?.detail?.before_opening) { toast(e?.message ?? String(e), "bad"); return; }
+      if (!me.capabilities.includes("admin")) { await tell("Paid before AVOS started", `${e.message} Ask the owner to close it.`); return; }
+      const ok = await askConfirm("Close this payout as paid before AVOS started?", `The money is already in the bank's opening balance of ${fmtDate(e.detail.opening_date)}. AVOS books the commission and settles the stays, and takes the same amount out of the opening, so the bank balance does not change. Undo puts it back.`, { ok: "Close against the opening balance" });
+      if (!ok) return;
+      await run(() => go({ before_opening: true }), "Closed against the opening balance · bank balance unchanged");
+    }
+    await Promise.all([list.reload(), un.reload(), detail.reload()]);
+  };
   const undo = async (id: string) => { const reason = await askText("Undo this settlement?", "Reason", { ok: "Undo", danger: true, body: "Every expense the settlement created is removed." }); if (reason) await run(async () => { await post(`/settlements/${id}/undo`, { reason }); await Promise.all([list.reload(), un.reload(), detail.reload()]); }, "Undone · every expense the settlement created removed"); };
   const ch = refs.channels.find((c) => c.code === channel);
   return <>
@@ -51,7 +63,7 @@ export function Payouts({ refs }: { me: Me; refs: Ref }) {
         <div className="actions end"><Btn kind="primary" disabled={!refn} onClick={create}>Draft settlement</Btn></div></>}</Card>
     </div>
     <BankPick accounts={refs.accounts} value={bankId} onChange={setBankId} label="Payouts land in" />
-    <Card title="Settlements">{!list.data ? <Loading /> : list.data.settlements.length === 0 ? <Empty>None yet.</Empty> : <ScrollX><table className="t"><thead><tr><th>Payout</th><th>Channel</th><th className="num">Stays</th><th className="num">Expected</th><th className="num">Received</th><th className="num">Variance</th><th>Status</th><th></th></tr></thead><tbody>{list.data.settlements.map((s: any) => <tr key={s.id}><td className="mono">{s.payout_ref}</td><td>{s.channel_name}</td><td className="num">{s.stays}</td><td className="num">{inr(s.expected_paise)}</td><td className="num">{inr(s.received_paise)}</td><td className="num">{inr(s.variance_paise)}</td><td><Status s={s.status} /></td><td className="actions"><Btn small onClick={() => setOpen(open === s.id ? null : s.id)}>{open === s.id ? "Close" : "Open"}</Btn>{s.status === "draft" && <Btn small kind="primary" onClick={() => settle(s.id)}>Mark settled</Btn>}{s.status === "settled" && <Btn small kind="danger" onClick={() => undo(s.id)}>Undo</Btn>}</td></tr>)}</tbody></table></ScrollX>}</Card>
+    <Card title="Settlements">{!list.data ? <Loading /> : list.data.settlements.length === 0 ? <Empty>None yet.</Empty> : <ScrollX><table className="t"><thead><tr><th>Payout</th><th>Channel</th><th className="num">Stays</th><th className="num">Expected</th><th className="num">Received</th><th className="num">Variance</th><th>Status</th><th></th></tr></thead><tbody>{list.data.settlements.map((s: any) => <tr key={s.id}><td className="mono">{s.payout_ref}</td><td>{s.channel_name}</td><td className="num">{s.stays}</td><td className="num">{inr(s.expected_paise)}</td><td className="num">{inr(s.received_paise)}</td><td className="num">{inr(s.variance_paise)}</td><td><Status s={s.status} />{s.opening_adjusted_paise > 0 && s.status === "settled" && <div className="sub">paid before AVOS started</div>}</td><td className="actions"><Btn small onClick={() => setOpen(open === s.id ? null : s.id)}>{open === s.id ? "Close" : "Open"}</Btn>{s.status === "draft" && <Btn small kind="primary" onClick={() => settle(s.id)}>Mark settled</Btn>}{s.status === "settled" && <Btn small kind="danger" onClick={() => undo(s.id)}>Undo</Btn>}</td></tr>)}</tbody></table></ScrollX>}</Card>
     {open && detail.data && <Card title={`Payout ${detail.data.settlement.payout_ref}`} sub={<>{detail.data.settlement.channel_name} · <Status s={detail.data.settlement.status} /></>}>
       <ScrollX><table className="t"><thead><tr><th>Stay</th><th className="num">Gross</th><th className="num">Commission</th><th className="num">Fee</th><th className="num">TCS</th><th className="num">TDS</th><th className="num">Net</th></tr></thead><tbody>{detail.data.items.map((i: any) => <tr key={i.booking_id}><td>{i.guest_name} · {fmtDate(i.check_out)}</td><td className="num">{inr(i.gross_paise)}</td><td className="num">{inr(i.commission_paise)}</td><td className="num">{inr(i.payment_fee_paise)}</td><td className="num">{inr(i.tcs_paise)}</td><td className="num">{inr(i.tds_paise)}</td><td className="num">{inr(i.net_paise)}</td></tr>)}</tbody></table></ScrollX>
       {detail.data.expenses.length > 0 && <div className="muted" style={{ marginTop: "8px" }}>Expenses this settlement created: {detail.data.expenses.map((e: any) => `${e.kind} ${inr(e.amount_paise)}${e.voided_at ? " (void)" : ""}`).join(" · ")}</div>}

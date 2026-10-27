@@ -34,6 +34,24 @@ describe("GST on OTA commission", () => {
     const r = await api("trupti", "POST", `/api/settlements/${s.id}/settle`, { account_id: "acc_bank" });
     expect(r.status).toBe(409);
     expect((await sql("SELECT status FROM settlements WHERE id = ?", s.id))[0].status).toBe("draft");
+    // Only the owner may close it against the opening balance.
+    expect((await api("trupti", "POST", `/api/settlements/${s.id}/settle`, { account_id: "acc_bank", before_opening: true })).status).toBe(403);
+    const balance = async () => (await ok("shaji", "GET", "/api/payments/accounts?as_of=2027-12-31")).accounts.find((a: any) => a.id === "acc_bank").balance_paise;
+    const openingOf = async () => (await sql("SELECT opening_paise FROM money_accounts WHERE id = 'acc_bank'"))[0].opening_paise;
+    const before = await balance(), opening = await openingOf();
+    await ok("shaji", "POST", `/api/settlements/${s.id}/settle`, { account_id: "acc_bank", before_opening: true });
+    const st = (await sql("SELECT status, received_paise, opening_adjusted_paise FROM settlements WHERE id = ?", s.id))[0];
+    expect(st.status).toBe("settled"); expect(st.opening_adjusted_paise).toBe(st.received_paise);
+    // The bank balance is unchanged: the amount moved out of the opening into the payout record.
+    expect(await balance()).toBe(before);
+    expect(await openingOf()).toBe(opening - st.received_paise);
+    // The commission is booked and the stay is settled.
+    expect((await sql("SELECT COUNT(*) AS n FROM expenses WHERE settlement_id = ? AND kind = 'ota_commission' AND voided_at IS NULL", s.id))[0].n).toBe(1);
+    expect((await ok("trupti", "GET", "/api/settlements/unsettled?channel=agoda")).stays.some((x: any) => x.id === b.booking.id)).toBe(false);
+    // Undo puts the amount back into the opening.
+    await ok("shaji", "POST", `/api/settlements/${s.id}/undo`, { reason: "test" });
+    expect(await openingOf()).toBe(opening);
+    expect(await balance()).toBe(before);
     await sql("UPDATE money_accounts SET opening_date = '2026-09-01' WHERE id = 'acc_bank'");
   });
 

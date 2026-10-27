@@ -3,6 +3,7 @@ import { Batch, HttpError, all, one, id, assertPeriodOpen, defaultBank, bankAcco
 import { nowIso, todayIn } from "../domain/dates";
 import { computeSettlement } from "../domain/settlement";
 import type { ChannelRow } from "../services/bookings";
+import { allowed } from "../auth";
 
 const r = newRouter();
 // The CA reads OTA payouts for the books; computing and settling stays with the revenue desk and owner.
@@ -87,7 +88,11 @@ r.post("/:id/settle", async (c) => {
   const variance = received - s.expected_paise;
   const bank = x.account_id ? await bankAccount(c.env.DB, p.id, str(x.account_id, "account_id")) : await defaultBank(c.env.DB, p.id);
   // The bank's opening balance already holds everything received before it was taken: adding an older payout counts it twice.
-  if (bank.opening_date && onDate < bank.opening_date) throw new HttpError(409, `${bank.name}'s balance in AVOS starts from the bank's own figure on ${bank.opening_date}, which already includes a payout received on ${onDate}: it cannot be added again. Leave these stays for the owner to close against the opening balance.`);
+  // The owner can close such a payout against the opening instead: the amount moves out of the opening into the payout,
+  // so the commission is booked and the stays are settled while the bank balance stays where the bank says it is.
+  const beforeOpening = !!bank.opening_date && onDate < bank.opening_date;
+  if (beforeOpening && x.before_opening !== true) throw new HttpError(409, `${bank.name}'s balance in AVOS starts from the bank's own figure on ${bank.opening_date}, which already includes a payout received on ${onDate}: it cannot be added again. The owner can close it as "paid before AVOS started".`, { before_opening: true, opening_date: bank.opening_date });
+  if (beforeOpening && !allowed(actor, "admin")) throw new HttpError(403, "only the owner can close a payout against the opening balance");
   const items = await all<any>(c.env.DB, "SELECT si.*, b.guest_id FROM settlement_items si JOIN bookings b ON b.id = si.booking_id WHERE si.settlement_id = ?", s.id);
   const now = nowIso();
   const b = new Batch(c.env.DB, actor);
@@ -108,9 +113,14 @@ r.post("/:id/settle", async (c) => {
       pid, p.id, it.booking_id, it.guest_id, it.gross_paise, bank.id, `${s.payout_ref}:${s.id}`, onDate, actor.id);
   }
   b.add("UPDATE settlements SET status = 'settled', received_paise = ?, variance_paise = ?, payout_on = ?, settled_by = ?, settled_at = ? WHERE id = ?", received, variance, onDate, actor.id, now, s.id);
+  if (beforeOpening) {
+    b.add("UPDATE money_accounts SET opening_paise = opening_paise - ? WHERE id = ?", received, bank.id);
+    b.add("UPDATE settlements SET opening_adjusted_paise = ?, opening_account_id = ? WHERE id = ?", received, bank.id, s.id);
+    b.audit("account.opening_adjusted", "money_account", bank.id, null, { less_paise: received, reason: `payout ${s.payout_ref} of ${onDate} was already in the opening balance of ${bank.opening_date}`, settlement_id: s.id });
+  }
   b.add("INSERT INTO approvals (id, property_id, kind, ref_id, summary, amount_paise, status, requested_by, decided_by, decided_at) VALUES (?,?,?,?,?,?,'approved',?,?,?)",
     id("apr"), p.id, "settlement", s.id, `${s.channel_name} payout ${s.payout_ref} settlement`, received, actor.id, actor.id, now);
-  b.audit("settlement.settle", "settlement", s.id, { status: "draft" }, { status: "settled", received_paise: received, variance_paise: variance, expenses: created, stays: items.map((i: any) => i.booking_id) });
+  b.audit("settlement.settle", "settlement", s.id, { status: "draft" }, { status: "settled", received_paise: received, variance_paise: variance, expenses: created, stays: items.map((i: any) => i.booking_id), before_opening: beforeOpening });
   await b.run();
   return c.json({ ok: true, received_paise: received, variance_paise: variance, expenses_created: created.length });
 });
@@ -132,6 +142,8 @@ r.post("/:id/undo", async (c) => {
   b.add("UPDATE statutory_credits SET status = 'reversed' WHERE settlement_id = ?", s.id);
   b.add("UPDATE payments SET status = 'void', voided_at = ?, void_reason = ? WHERE property_id = ? AND method = 'ota' AND reference = ? AND status != 'void'", now, `settlement undone: ${reason}`, p.id, `${s.payout_ref}:${s.id}`);
   b.add("UPDATE settlements SET status = 'undone', undone_by = ?, undone_at = ? WHERE id = ?", actor.id, now, s.id);
+  // A payout closed against the opening balance puts its amount back into the opening.
+  if (s.opening_adjusted_paise && s.opening_account_id) b.add("UPDATE money_accounts SET opening_paise = opening_paise + ? WHERE id = ?", s.opening_adjusted_paise, s.opening_account_id);
   b.audit("settlement.undo", "settlement", s.id, { status: "settled" }, { status: "undone", reason });
   await b.run();
   return c.json({ ok: true });
