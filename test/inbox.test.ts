@@ -91,6 +91,15 @@ describe("Inbox automation", () => {
     expect((await sql("SELECT COUNT(*) AS n FROM payments WHERE booking_id = ? AND status != 'void'", bk.booking.id))[0].n).toBe(1);
   });
 
+  it("files a STAAH Max payment link with what it asked for, tied to the booking reference", async () => {
+    const text = "The Meadows Varkala\nPAYMENT REQUEST\nReference: 10609000001061952136\n 27 Oct 2026\nDear Test Guest,\nThank you for choosing The Meadows Varkala! To confirm your upcoming stay, kindly complete your payment using the secure link below.\nBOOKING DETAILS\nBooking Reference:\t1060900000106195\nGuest Name:\tTest Guest\nRoom Type/Rate Plan:\tPremium Lawn View / Morning Bliss\nGuest Info:\t2 Adults / 0 Children\nStay Info:\t27 Oct 2026 to 28 Oct 2026 (1 night)\nAmount Due:\tINR 1.00\nPAYMENT INSTRUCTIONS\nThis payment link expires on 28-Oct-2026 16:55:22. Please ensure payment is completed before this time to secure your reservation.\nPROCEED TO PAYMENT\nhttps://www.swiftbook.io/inst/#securepayment?propertyId=x&tkn=y&sp=Y\nWarm Regards,\nThe Meadows Varkala";
+    const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "noreply@mybookingsite.io", subject: "The Meadows Varkala - Payment link - reference 10609000001061952136", text });
+    expect(ing.parsed).toMatchObject({ source: "staahmax", kind: "payment_request", external_ref: "10609000001061952136" });
+    expect(ing.parsed.data).toMatchObject({ booking_ref: "1060900000106195", guest_name: "Test Guest", amount_due_paise: 100, check_in: "2026-10-27", check_out: "2026-10-28" });
+    expect(ing.status).toBe("dismissed");
+    expect((await sql("SELECT auto_note FROM inbox_items WHERE id = ?", ing.id))[0].auto_note).toMatch(/payment link sent to Test Guest for ₹1\.00 \(booking 1060900000106195\)/);
+  });
+
   it("never takes a failed or pending Airpay attempt for a payment", async () => {
     const mail = (subject: string, head: string) => parseInboundEmail("noreply@airpay.co.in", subject, undefined, `${head}\nOrder ID\n179000000000999\nCustomer Name\nSOME GUEST\nOrder Amount\nINR 5250.00\nAirpay Id\n2099999003\nhttps://nps.airpay.co.in/view.php?id=3`);
     for (const [subject, head] of [["Order ID 179000000000999 Transaction is Unsuccessful", "INR 5250.00\nTransaction Unsuccessful"], ["Order ID 179000000000999 Transaction Failed", "INR 5250.00\nPayment failed"], ["Order ID 179000000000999 Transaction Pending", "INR 5250.00\nYour transaction is pending"]]) {

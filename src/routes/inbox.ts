@@ -102,6 +102,14 @@ async function initialStatus(env: Env, propertyId: string, parsed: ParsedEmail, 
  * AVOS can read. It is filed as dismissed with the reason, so it never waits for a person. A forwarded email is kept:
  * that is how staff hand AVOS something on purpose.
  */
+/** A payment link sent to a guest is a record, not work: it is filed with what it asked for. */
+function paymentRequestNote(parsed: ParsedEmail): string | null {
+  if (parsed.kind !== "payment_request") return null;
+  const d = parsed.data as Record<string, any>;
+  const amt = d.amount_due_paise != null ? `₹${(Number(d.amount_due_paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "an amount";
+  return `payment link sent to ${d.guest_name ?? "the guest"} for ${amt} (booking ${d.booking_ref ?? "?"}); the payment is recorded when its confirmation or Airpay receipt arrives`;
+}
+
 async function ownMailNote(env: Env, propertyId: string, from: string, subject: string, html: string | undefined, text: string | undefined, parsed: ParsedEmail): Promise<string | null> {
   if (parsed.source !== "unknown") return null;
   const addr = (from.match(/<([^>]+)>/)?.[1] ?? from).trim().toLowerCase();
@@ -131,7 +139,7 @@ export async function ingestEmail(env: Env, propertyId: string, msg: { message_i
   let rawKey: string | null = null;
   if (msg.raw) { rawKey = `inbox/${propertyId}/${iid}.eml`; await env.FILES.put(rawKey, msg.raw, { httpMetadata: { contentType: "message/rfc822" } }); }
   else if (msg.text || msg.html) { rawKey = `inbox/${propertyId}/${iid}.txt`; await env.FILES.put(rawKey, JSON.stringify({ from: msg.from, subject: msg.subject, text: msg.text ?? null, html: msg.html ?? null }), { httpMetadata: { contentType: "application/json" } }); }
-  const own = await ownMailNote(env, propertyId, msg.from, msg.subject, msg.html, msg.text, parsed);
+  const own = paymentRequestNote(parsed) ?? await ownMailNote(env, propertyId, msg.from, msg.subject, msg.html, msg.text, parsed);
   const status = own ? "dismissed" : await initialStatus(env, propertyId, parsed);
   const b = new Batch(env.DB, null);
   b.add(`INSERT INTO inbox_items (id, property_id, source, kind, message_id, from_addr, subject, received_at, raw_key, parsed_json, parser_version, external_ref, status, auto_note)
@@ -156,7 +164,7 @@ export async function reparseItem(env: Env, propertyId: string, itemId: string, 
   else if (obj) { const j = JSON.parse(await obj.text()); from = j.from ?? from; subject = j.subject ?? subject; text = j.text ?? undefined; html = j.html ?? undefined; }
   else { const d = JSON.parse(item.parsed_json ?? "{}"); text = d.preview ?? ""; }
   const parsed = parseInboundEmail(from, subject, html, text);
-  const own = await ownMailNote(env, propertyId, from, subject, html, text, parsed);
+  const own = paymentRequestNote(parsed) ?? await ownMailNote(env, propertyId, from, subject, html, text, parsed);
   const status = own ? "dismissed" : await initialStatus(env, propertyId, parsed, { id: item.id, received_at: item.received_at });
   const b = new Batch(env.DB, null);
   b.add("UPDATE inbox_items SET source = ?, kind = ?, parsed_json = ?, parser_version = ?, external_ref = ?, status = ?, auto_note = ? WHERE id = ?",

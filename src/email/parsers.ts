@@ -1,14 +1,14 @@
 import { rupeesToPaise } from "../domain/money";
 import { parseLooseDate } from "../domain/dates";
 
-export const PARSER_VERSION = "2026-10-27a";
+export const PARSER_VERSION = "2026-10-27b";
 
 /** "Villa", "Entire villa", "Whole villa", "Full villa": the booking engine's name for all rooms together. */
 export const isWholeVilla = (roomName: unknown) => /^(the\s+)?(entire|whole|full|complete|exclusive)?\s*villa\b/i.test(String(roomName ?? "").trim());
 
 export interface ParsedEmail {
-  source: "staah" | "swiftbook" | "airpay" | "bookingengine" | "bank" | "unknown";
-  kind: "new_reservation" | "modification" | "cancellation" | "payment" | "bank_alert" | "unknown";
+  source: "staah" | "swiftbook" | "airpay" | "bookingengine" | "staahmax" | "bank" | "unknown";
+  kind: "new_reservation" | "modification" | "cancellation" | "payment" | "payment_request" | "bank_alert" | "unknown";
   external_ref: string | null;
   data: Record<string, unknown>;
   confidence: "high" | "low";
@@ -243,6 +243,26 @@ export function forwardedSentAt(whole: string): string | null {
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
 
+/**
+ * STAAH Max online-payment request ("Payment link - reference 10609000001061952136"): the property sent the guest a
+ * payment link. The reference is the booking reference plus four digits, the same form as Airpay's order id, so the
+ * link, the payment confirmation and Airpay's receipt all point at one booking. A request is not money: it is filed.
+ */
+export function parseStaahMaxRequest(subject: string, body: string, year: number): ParsedEmail {
+  const order = grab(body, /Reference\s*:?\s*([0-9]{18,})/i) ?? grab(subject, /reference\s*([0-9]{18,})/i);
+  const bookingRef = grab(body, /Booking Reference\s*:?\s*([0-9]{10,17})\b/i);
+  const guest = grab(body, /Guest Name\s*:?\s*([^\n]+)/i) ?? grab(body, /Dear\s+([^,\n]+),/i);
+  const due = grab(body, /Amount Due\s*:?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+\.?\d*)/i);
+  const stay = body.match(/Stay Info\s*:?\s*(\d{1,2}\s+[A-Za-z]{3,}\s+\d{4})\s+to\s+(\d{1,2}\s+[A-Za-z]{3,}\s+\d{4})/i);
+  const expires = grab(body, /link expires on\s*([0-9]{1,2}-[A-Za-z]{3}-[0-9]{4}(?:\s+[0-9:]+)?)/i);
+  const data = {
+    order_id: order, booking_ref: bookingRef ?? (order && order.length > 16 ? order.slice(0, 16) : null), guest_name: guest,
+    amount_due_paise: due ? rupeesToPaise(due) : null,
+    check_in: stay ? parseLooseDate(stay[1], year) : null, check_out: stay ? parseLooseDate(stay[2], year) : null, link_expires: expires,
+  };
+  return { source: "staahmax", kind: "payment_request", external_ref: order, data, confidence: order ? "high" : "low" };
+}
+
 export function parseInboundEmail(from: string, rawSubject: string, html?: string, text?: string, now = new Date()): ParsedEmail {
   const whole = textOf(html, text);
   const body = forwardedPart(whole);          // a forwarded notification is read past the forwarder's signature
@@ -256,6 +276,8 @@ export function parseInboundEmail(from: string, rawSubject: string, html?: strin
   const looksAirpay = f.includes("airpay") || fwdFrom.includes("airpay") || /airpay/i.test(subject) || (/Airpay\s*Id/i.test(body) && /airpay\.co\.in/i.test(body));
   const looksBank = f.includes("idfcfirstbank") || fwdFrom.includes("idfcfirstbank") || /transaction alert from .*bank/i.test(subject) || (/has been (credited|debited) with (INR|Rs)/i.test(body) && /A\/C/i.test(body));
   if (looksBank) return parseBankAlert(subject, body);
+  // STAAH Max payment request: sent from the booking engine's address, so it is told apart before the confirmations.
+  if (/Payment link\s*-\s*reference/i.test(subject) || (/PAYMENT REQUEST/.test(body) && /Amount Due/i.test(body))) return parseStaahMaxRequest(subject, body, year);
   const looksEngine = f.includes("mybookingsite") || fwdFrom.includes("mybookingsite") || (/^\s*\((Confirmed|Cancelled|Canceled|Modified)\)/i.test(subject) && /Reservation\s*No/i.test(subject)) || (/Booking Confirmation/i.test(body) && /Booking ID/i.test(body) && /Guest Information/i.test(body));
   if (looksEngine) return parseBookingEngine(subject, body, year);
   if (looksStaah) return parseStaah(subject, body, year);
