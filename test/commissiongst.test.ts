@@ -26,4 +26,11 @@ describe("GST on OTA commission", () => {
     const exp = (await sql("SELECT amount_paise, gst_rate_bp, gst_paise FROM expenses WHERE settlement_id = ? AND kind = 'ota_commission'", s.id))[0];
     expect(exp).toEqual({ amount_paise: 212400, gst_rate_bp: 1800, gst_paise: 32400 });
   });
+
+  it("refuses a payout dated before a stay it is said to cover", async () => {
+    const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Later Guest", guest_phone: "9500000082", channel_code: "agoda", external_ref: "AG-777002", check_in: "2027-09-10", check_out: "2027-09-11", rooms: [{ room_id: "loc_r4", nightly_rate_paise: 1000000 }] });
+    const r = await api("trupti", "POST", "/api/settlements", { channel_code: "agoda", booking_ids: [b.booking.id], payout_ref: "AGODA-OLD-1", payout_on: "2027-08-29" });
+    expect(r.status).toBe(409);
+    expect((await sql("SELECT COUNT(*) AS n FROM settlements WHERE payout_ref = 'AGODA-OLD-1'"))[0].n).toBe(0);
+  });
 });

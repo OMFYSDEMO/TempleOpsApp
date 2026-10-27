@@ -35,10 +35,14 @@ r.post("/", async (c) => {
   if (!ch) throw new HttpError(400, "unknown channel");
   const ids: string[] = Array.isArray(x.booking_ids) ? x.booking_ids.map(String) : [];
   if (!ids.length) throw new HttpError(400, "booking_ids required");
-  const stays = await all<{ id: string; room_total_paise: number; gst_paise: number }>(c.env.DB, `SELECT id, room_total_paise, gst_paise FROM bookings WHERE property_id = ? AND channel_id = ? AND id IN (${ids.map(() => "?").join(",")})`, p.id, ch.id, ...ids);
+  const stays = await all<{ id: string; room_total_paise: number; gst_paise: number; check_in: string; guest_name: string }>(c.env.DB, `SELECT b.id, b.room_total_paise, b.gst_paise, b.check_in, (SELECT name FROM guests g WHERE g.id = b.guest_id) AS guest_name FROM bookings b WHERE b.property_id = ? AND b.channel_id = ? AND b.id IN (${ids.map(() => "?").join(",")})`, p.id, ch.id, ...ids);
   if (stays.length !== ids.length) throw new HttpError(400, "a booking is not on this channel");
   const already = await all<{ booking_id: string }>(c.env.DB, `SELECT si.booking_id FROM settlement_items si JOIN settlements s ON s.id = si.settlement_id WHERE s.status = 'settled' AND si.booking_id IN (${ids.map(() => "?").join(",")})`, ...ids);
   if (already.length) throw new HttpError(409, "already settled", { booking_ids: already.map((a) => a.booking_id) });
+  // A payout cannot pay for a stay that had not begun when it was paid: that is an older payout matched to the wrong stays.
+  const payoutOn = optStr(x.payout_on, "payout_on");
+  const early = payoutOn ? stays.filter((s) => s.check_in > payoutOn) : [];
+  if (early.length) throw new HttpError(409, `a payout dated ${payoutOn} cannot cover stays that began later (${early.map((s) => `${s.guest_name}, check-in ${s.check_in}`).join("; ")}): tick the stays this payout actually covers`);
   const terms = { ...ch };
   if (x.terms) Object.assign(terms, x.terms); // per-payout override (e.g. a promo commission), audited below
   const calc = computeSettlement(terms, stays.map((s) => ({ bookingId: s.id, roomTotalPaise: s.room_total_paise, gstPaise: s.gst_paise })));
