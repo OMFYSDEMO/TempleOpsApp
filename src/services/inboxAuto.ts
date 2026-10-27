@@ -136,7 +136,8 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
     }
     if (item.kind === "payment") {
       if (parsed.confidence !== "high" || !d.success) return { applied: false, note: "not a confirmed successful transaction" };
-      // Already recorded under either number: the desk often types the Airpay Id rather than the order id.
+      // Already recorded under either number: the desk often types the Airpay Id rather than the order id. A STAAH Max
+      // payment and Airpay's receipt for it share the order id, so whichever arrives second is a duplicate.
       const dup = await one<{ id: string }>(db, "SELECT id FROM payments WHERE property_id = ? AND method = 'airpay' AND reference IN (?, ?) AND status != 'void'", property.id, String(d.order_id), String(d.airpay_id ?? d.order_id));
       if (dup) {
         const b = new Batch(db, actor);
@@ -146,7 +147,9 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
         return { applied: false, note: "already recorded" };
       }
       // Airpay order ids begin with the SwiftBook itinerary number: that is the stay the money is for.
-      const bk = await all<{ id: string; guest_name: string }>(db, "SELECT b.id, g.name AS guest_name FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.external_ref IS NOT NULL AND ? LIKE b.external_ref || '%' AND b.status NOT IN ('cancelled','no_show') ORDER BY b.created_at DESC", property.id, String(d.order_id));
+      let bk = await all<{ id: string; guest_name: string }>(db, "SELECT b.id, g.name AS guest_name FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.external_ref IS NOT NULL AND ? LIKE b.external_ref || '%' AND b.status NOT IN ('cancelled','no_show') ORDER BY b.created_at DESC", property.id, String(d.order_id));
+      // A STAAH Max payment also names the booking reference itself: the booking may carry that rather than the order id.
+      if (!bk.length && d.booking_ref) bk = await all<{ id: string; guest_name: string }>(db, "SELECT b.id, g.name AS guest_name FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.external_ref IS NOT NULL AND (b.external_ref = ? OR b.external_ref LIKE ? || '%') AND b.status NOT IN ('cancelled','no_show')", property.id, String(d.booking_ref), String(d.booking_ref));
       if (bk.length !== 1) return { applied: false, note: bk.length ? "order matches more than one stay" : "no stay matches the order id: confirm or dismiss on the Payments screen" };
       // Dated the day the guest paid: the receipt's own send time (a forward carries it), else when the email arrived.
       const arrived = await one<{ received_at: string }>(db, "SELECT received_at FROM inbox_items WHERE id = ?", item.id);
@@ -158,7 +161,7 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
       const b = new Batch(db, actor);
       b.add("UPDATE inbox_items SET auto_applied = 1, auto_note = NULL WHERE id = ?", item.id);
       b.audit("inbox.auto_pay", "inbox_item", item.id, { status: "routed" }, { status: "approved", payment_id: pay.id, booking_id: bk[0].id });
-      await notifyRole(b, property.id, "property", "inbox_auto_paid", `Airpay ${Number(d.amount_paise) / 100} received for ${bk[0].guest_name} (order ${d.order_id})`, { kind: "payment", id: pay.id });
+      await notifyRole(b, property.id, "property", "inbox_auto_paid", `${d.via ?? "Airpay"} ${Number(d.amount_paise) / 100} received for ${bk[0].guest_name} (order ${d.order_id})`, { kind: "payment", id: pay.id });
       await b.run();
       return { applied: true, what: "paid", id: pay.id };
     }

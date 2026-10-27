@@ -84,7 +84,7 @@ export async function allWorkItems(db: D1Database, p: PropertyRow, now = nowIso(
     out.push(item("task", `task:${r.id}`, `${r.title} · ${r.loc}`, `${r.kind}${r.priority === "high" ? " · high priority" : ""}${r.due_on ? ` · due ${r.due_on}` : ""}`, "property", r.created_at, "#tasks", now));
   for (const r of await all<any>(db, "SELECT id, received_at, parsed_json FROM inbox_items WHERE property_id = ? AND kind = 'payment' AND status = 'routed' ORDER BY received_at", p.id)) {
     const d = r.parsed_json ? JSON.parse(r.parsed_json) : {};
-    out.push(item("receipt", `receipt:${r.id}`, `Airpay receipt ${d.order_id ?? ""} · ₹${((d.amount_paise ?? 0) / 100).toLocaleString("en-IN")} not matched to a stay`, d.payer_name ?? null, "property", r.received_at, "#pay", now));
+    out.push(item("receipt", `receipt:${r.id}`, `${d.via ?? "Airpay"} receipt ${d.order_id ?? ""} · ₹${((d.amount_paise ?? 0) / 100).toLocaleString("en-IN")} not matched to a stay`, d.payer_name ?? null, "property", r.received_at, "#pay", now));
   }
   // A website booking the guest paid online, whose Airpay receipt never reached the books (a mail filter that
   // did not forward it, say). The booking email says what was paid; the payment is recorded from the receipt.

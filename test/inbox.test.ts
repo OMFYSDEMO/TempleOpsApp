@@ -100,6 +100,28 @@ describe("Inbox automation", () => {
     expect((await sql("SELECT auto_note FROM inbox_items WHERE id = ?", ing.id))[0].auto_note).toMatch(/payment link sent to Test Guest for ₹1\.00 \(booking 1060900000106195\)/);
   });
 
+  it("records a STAAH Max online payment against the booking once, whichever of it and Airpay's receipt comes first", async () => {
+    const maxMail = (order: string, bookingRef: string, amount: string) => ({ from: "noreply@mybookingsite.io", subject: "The Meadows Varkala - You have received payment through STAAH Max Online Payment",
+      text: `Property\tThe Meadows Varkala\nPAYMENT RECEIVED\t27 Oct 2026\nReference: ${order}\n\nDear The Meadows Varkala,\nYou have received payment through STAAH Max Online Payment of INR ${amount}.\n# PAYMENT DETAILS:\nEmail:\tguest@example.com\nContact Ph:\t+91 9000000000\nBOOKING DETAILS\nBooking Reference:\t${bookingRef}\nGuest Name:\tMax Guest\nRoom Type/Rate Plan:\tPremium Lawn View / Morning Bliss\nGuest Info:\t2 Adults / 0 Children\nStay Info:\t27 Oct 2026 to 28 Oct 2026 (1 night)\nAmount Paid:\tINR ${amount}.00\nKind Regards,\n\nSTAAH Team\nThe Meadows Varkala` });
+    const airpayMail = (order: string, amount: string, id: string) => ({ from: "noreply@airpay.co.in", subject: `Congratulations! Order ID ${order} Transaction is Successful`, text: `INR ${amount}\nCollected Successfully\nOrder ID\n${order}\nCustomer Name\nMAX GUEST\nOrder Amount\nINR ${amount}\nAirpay Id\n${id}\nhttps://nps.airpay.co.in/view.php?id=9` });
+    // 1. The booking carries the confirmation's reservation number (= the order id); STAAH Max first, Airpay second.
+    const b1 = await ok("shaji", "POST", "/api/bookings", { guest_name: "Max Guest", guest_phone: "9000000001", channel_code: "direct", external_ref: "10609000001063720001", check_in: "2027-09-01", check_out: "2027-09-02", rooms: [{ room_id: "loc_r2", nightly_rate_paise: 650000 }] });
+    const m1 = await ok("prachi", "POST", "/api/inbox/ingest", maxMail("10609000001063720001", "1060900000106372", "1000"));
+    expect(m1.parsed).toMatchObject({ source: "staahmax", kind: "payment", external_ref: "10609000001063720001" });
+    expect(m1.parsed.data).toMatchObject({ booking_ref: "1060900000106372", amount_paise: 100000, success: true });
+    expect(m1.auto.what).toBe("paid");
+    const a1 = await ok("prachi", "POST", "/api/inbox/ingest", airpayMail("10609000001063720001", "1000.00", "2099990001"));
+    expect(a1.status).toBe("duplicate");
+    expect((await sql("SELECT COUNT(*) AS n, SUM(amount_paise) AS s FROM payments WHERE booking_id = ? AND status != 'void'", b1.booking.id))[0]).toEqual({ n: 1, s: 100000 });
+    // 2. The booking carries only the 16-digit booking reference; Airpay first, STAAH Max second.
+    const b2 = await ok("shaji", "POST", "/api/bookings", { guest_name: "Max Guest Two", guest_phone: "9000000002", channel_code: "direct", external_ref: "1060900000106399", check_in: "2027-09-03", check_out: "2027-09-04", rooms: [{ room_id: "loc_r2", nightly_rate_paise: 650000 }] });
+    const a2 = await ok("prachi", "POST", "/api/inbox/ingest", airpayMail("10609000001063990002", "500.00", "2099990002"));
+    expect(a2.auto.what).toBe("paid");
+    const m2 = await ok("prachi", "POST", "/api/inbox/ingest", maxMail("10609000001063990002", "1060900000106399", "500"));
+    expect(m2.status).toBe("duplicate");
+    expect((await sql("SELECT COUNT(*) AS n FROM payments WHERE booking_id = ? AND status != 'void'", b2.booking.id))[0].n).toBe(1);
+  });
+
   it("never takes a failed or pending Airpay attempt for a payment", async () => {
     const mail = (subject: string, head: string) => parseInboundEmail("noreply@airpay.co.in", subject, undefined, `${head}\nOrder ID\n179000000000999\nCustomer Name\nSOME GUEST\nOrder Amount\nINR 5250.00\nAirpay Id\n2099999003\nhttps://nps.airpay.co.in/view.php?id=3`);
     for (const [subject, head] of [["Order ID 179000000000999 Transaction is Unsuccessful", "INR 5250.00\nTransaction Unsuccessful"], ["Order ID 179000000000999 Transaction Failed", "INR 5250.00\nPayment failed"], ["Order ID 179000000000999 Transaction Pending", "INR 5250.00\nYour transaction is pending"]]) {

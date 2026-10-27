@@ -1,7 +1,7 @@
 import { rupeesToPaise } from "../domain/money";
 import { parseLooseDate } from "../domain/dates";
 
-export const PARSER_VERSION = "2026-10-27b";
+export const PARSER_VERSION = "2026-10-27c";
 
 /** "Villa", "Entire villa", "Whole villa", "Full villa": the booking engine's name for all rooms together. */
 export const isWholeVilla = (roomName: unknown) => /^(the\s+)?(entire|whole|full|complete|exclusive)?\s*villa\b/i.test(String(roomName ?? "").trim());
@@ -263,6 +263,25 @@ export function parseStaahMaxRequest(subject: string, body: string, year: number
   return { source: "staahmax", kind: "payment_request", external_ref: order, data, confidence: order ? "high" : "low" };
 }
 
+/**
+ * STAAH Max online payment received ("You have received payment through STAAH Max Online Payment of INR 10"). The
+ * reference is the order id the payment went through (booking reference + four digits, as on Airpay's receipt), so
+ * the payment is recorded under it and Airpay's receipt for the same order is then a duplicate, whichever comes first.
+ */
+export function parseStaahMaxPayment(subject: string, body: string): ParsedEmail {
+  const order = grab(body, /Reference\s*:?\s*([0-9]{14,})/i);
+  const bookingRef = grab(body, /Booking Reference\s*:?\s*([0-9]{10,17})\b/i);
+  const paid = grab(body, /Amount Paid\s*:?\s*(?:INR|Rs\.?|₹)?\s*([\d,]+\.?\d*)/i) ?? grab(body, /Online Payment of\s*(?:INR|Rs\.?|₹)\s*([\d,]+\.?\d*)/i);
+  const failed = /unsuccessful|\bfail(?:ed|ure)?\b|declined|\bpending\b|\bcancell?ed\b|\brejected\b/i.test(`${subject}\n${body.slice(0, 600)}`);
+  const data = {
+    order_id: order, booking_ref: bookingRef ?? (order && order.length > 16 ? order.slice(0, 16) : null),
+    amount_paise: paid ? rupeesToPaise(paid) : null, payer_name: grab(body, /Guest Name\s*:?\s*([^\n]+)/i),
+    payer_email: grab(body, /Email\s*:?\s*([\w.+-]+@[\w-]+\.[\w.-]+)/i), via: "STAAH Max Online Payment",
+    success: !failed && /PAYMENT RECEIVED|You have received payment/i.test(`${subject}\n${body}`),
+  };
+  return { source: "staahmax", kind: "payment", external_ref: order, data, confidence: order && data.amount_paise && data.success ? "high" : "low" };
+}
+
 export function parseInboundEmail(from: string, rawSubject: string, html?: string, text?: string, now = new Date()): ParsedEmail {
   const whole = textOf(html, text);
   const body = forwardedPart(whole);          // a forwarded notification is read past the forwarder's signature
@@ -276,7 +295,8 @@ export function parseInboundEmail(from: string, rawSubject: string, html?: strin
   const looksAirpay = f.includes("airpay") || fwdFrom.includes("airpay") || /airpay/i.test(subject) || (/Airpay\s*Id/i.test(body) && /airpay\.co\.in/i.test(body));
   const looksBank = f.includes("idfcfirstbank") || fwdFrom.includes("idfcfirstbank") || /transaction alert from .*bank/i.test(subject) || (/has been (credited|debited) with (INR|Rs)/i.test(body) && /A\/C/i.test(body));
   if (looksBank) return parseBankAlert(subject, body);
-  // STAAH Max payment request: sent from the booking engine's address, so it is told apart before the confirmations.
+  // STAAH Max payment received / payment request: sent from the booking engine's address, so they are told apart first.
+  if (/received payment through STAAH Max/i.test(subject) || (/PAYMENT RECEIVED/.test(body) && /STAAH Max Online Payment/i.test(body))) return parseStaahMaxPayment(subject, body);
   if (/Payment link\s*-\s*reference/i.test(subject) || (/PAYMENT REQUEST/.test(body) && /Amount Due/i.test(body))) return parseStaahMaxRequest(subject, body, year);
   const looksEngine = f.includes("mybookingsite") || fwdFrom.includes("mybookingsite") || (/^\s*\((Confirmed|Cancelled|Canceled|Modified)\)/i.test(subject) && /Reservation\s*No/i.test(subject)) || (/Booking Confirmation/i.test(body) && /Booking ID/i.test(body) && /Guest Information/i.test(body));
   if (looksEngine) return parseBookingEngine(subject, body, year);
