@@ -106,6 +106,14 @@ r.post("/:id/settle", async (c) => {
   if (variance !== 0) exp("fee_variance", -variance, `${s.channel_name} payout variance · ${s.payout_ref}`); // short receipt is a cost; excess a negative cost
   for (const k of ["tcs", "tds"] as const) if (s[`${k}_paise`] > 0)
     b.add("INSERT INTO statutory_credits (id, property_id, kind, settlement_id, amount_paise, period) VALUES (?,?,?,?,?,?)", id("stc"), p.id, k, s.id, s[`${k}_paise`], onDate.slice(0, 7));
+  // TCS and TDS are withheld by the OTA and never reach the bank: they move out of the bank into the account that holds
+  // what is to be recovered from the tax department, so the bank shows only what actually arrived.
+  const withheld = Number(s.tcs_paise) + Number(s.tds_paise);
+  if (withheld > 0) {
+    const rec = await statutoryAccount(c.env.DB, p.id, b);
+    b.add("INSERT INTO transfers (id, property_id, from_account_id, to_account_id, amount_paise, on_date, reference, note, recorded_by) VALUES (?,?,?,?,?,?,?,?,?)",
+      id("trf"), p.id, bank.id, rec, withheld, onDate, `${s.payout_ref}:${s.id}`, `TCS/TDS withheld by ${s.channel_name} on payout ${s.payout_ref}`, actor.id);
+  }
   // The OTA pays each stay's gross (the commission/fee expenses net it off) — one 'ota' payment per stay keeps the stay fully paid.
   for (const it of items) {
     const pid = id("pay");
@@ -126,6 +134,15 @@ r.post("/:id/settle", async (c) => {
 });
 
 /** Undo removes every expense, credit and receipt the settlement created — the duplicate-₹806 class of error cannot recur. */
+/** The account holding TCS/TDS to recover; created on first use. */
+async function statutoryAccount(db: D1Database, propertyId: string, b: Batch): Promise<string> {
+  const a = await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = 'ota_clearing' AND name = 'TCS/TDS to recover'", propertyId);
+  if (a) return a.id;
+  const aid = id("acc");
+  b.add("INSERT INTO money_accounts (id, property_id, kind, name, holder_role, opening_paise, active, note) VALUES (?,?,'ota_clearing','TCS/TDS to recover','owner',0,1,?)", aid, propertyId, "TCS and TDS withheld by OTAs, claimed back through the GST portal and 26AS");
+  return aid;
+}
+
 r.post("/:id/undo", async (c) => {
   const p = c.get("property"); const actor = c.get("actor");
   const s: any = await one(c.env.DB, "SELECT * FROM settlements WHERE id = ? AND property_id = ?", c.req.param("id"), p.id);
@@ -140,6 +157,7 @@ r.post("/:id/undo", async (c) => {
   const b = new Batch(c.env.DB, actor);
   b.add("UPDATE expenses SET voided_at = ?, void_reason = ? WHERE settlement_id = ? AND voided_at IS NULL", now, `settlement undone: ${reason}`, s.id);
   b.add("UPDATE statutory_credits SET status = 'reversed' WHERE settlement_id = ?", s.id);
+  b.add("UPDATE transfers SET voided_at = ? WHERE property_id = ? AND reference = ? AND voided_at IS NULL", now, p.id, `${s.payout_ref}:${s.id}`);
   b.add("UPDATE payments SET status = 'void', voided_at = ?, void_reason = ? WHERE property_id = ? AND method = 'ota' AND reference = ? AND status != 'void'", now, `settlement undone: ${reason}`, p.id, `${s.payout_ref}:${s.id}`);
   b.add("UPDATE settlements SET status = 'undone', undone_by = ?, undone_at = ? WHERE id = ?", actor.id, now, s.id);
   // A payout closed against the opening balance puts its amount back into the opening.

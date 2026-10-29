@@ -9,7 +9,7 @@ describe("GST on OTA commission", () => {
   it("the owner sets it per channel; the payout and the commission expense carry it", async () => {
     const ref = await ok("shaji", "GET", "/api/ref");
     const agoda = ref.channels.find((c: any) => c.code === "agoda");
-    await ok("shaji", "PATCH", `/api/admin/channels/${agoda.id}`, { commission_bp: 1800, commission_gst_bp: 1800 });
+    await ok("shaji", "PATCH", `/api/admin/channels/${agoda.id}`, { commission_bp: 1800, commission_gst_bp: 1800, tcs_bp: 50, tds_bp: 10 });
     expect((await api("trupti", "PATCH", `/api/admin/channels/${agoda.id}`, { commission_gst_bp: 0 })).status).toBe(403);
     // The desks never see OTA terms.
     expect((await ok("prachi", "GET", "/api/ref")).channels.some((c: any) => "commission_gst_bp" in c)).toBe(false);
@@ -22,7 +22,14 @@ describe("GST on OTA commission", () => {
     expect(prev.preview.expectedPaise).toBe(prev.preview.grossPaise - 180000 - 32400 - prev.preview.paymentFeePaise - prev.preview.tcsPaise - prev.preview.tdsPaise);
 
     const s = await ok("trupti", "POST", "/api/settlements", { channel_code: "agoda", booking_ids: [b.booking.id], payout_ref: "AGODA-PAY-1", payout_on: "2027-08-05" });
+    const bankId = (await sql("SELECT id FROM money_accounts WHERE kind = 'bank' AND active = 1 ORDER BY is_default DESC, id LIMIT 1"))[0].id;
+    const bankBal = async () => (await ok("shaji", "GET", "/api/payments/accounts?as_of=2027-12-31")).accounts.find((a: any) => a.id === bankId).balance_paise;
+    const before = await bankBal();
     await ok("trupti", "POST", `/api/settlements/${s.id}/settle`, {});
+    // The bank gains only what the OTA actually paid; TCS and TDS sit in the account to recover them.
+    expect(await bankBal() - before).toBe(prev.preview.expectedPaise);
+    const rec = (await ok("shaji", "GET", "/api/payments/accounts?as_of=2027-12-31")).accounts.find((a: any) => a.name === "TCS/TDS to recover");
+    expect(rec.balance_paise).toBe(prev.preview.tcsPaise + prev.preview.tdsPaise);
     const exp = (await sql("SELECT amount_paise, gst_rate_bp, gst_paise FROM expenses WHERE settlement_id = ? AND kind = 'ota_commission'", s.id))[0];
     expect(exp).toEqual({ amount_paise: 212400, gst_rate_bp: 1800, gst_paise: 32400 });
   });
