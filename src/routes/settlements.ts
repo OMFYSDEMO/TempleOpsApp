@@ -94,6 +94,10 @@ r.post("/:id/settle", async (c) => {
   if (beforeOpening && x.before_opening !== true) throw new HttpError(409, `${bank.name}'s balance in AVOS starts from the bank's own figure on ${bank.opening_date}, which already includes a payout received on ${onDate}: it cannot be added again. The owner can close it as "paid before AVOS started".`, { before_opening: true, opening_date: bank.opening_date });
   if (beforeOpening && !allowed(actor, "admin")) throw new HttpError(403, "only the owner can close a payout against the opening balance");
   const items = await all<any>(c.env.DB, "SELECT si.*, b.guest_id FROM settlement_items si JOIN bookings b ON b.id = si.booking_id WHERE si.settlement_id = ?", s.id);
+  // A draft can go stale: another payout may have settled one of its stays since it was drafted.
+  const taken = await all<{ name: string; payout_ref: string }>(c.env.DB, `SELECT g.name, o.payout_ref FROM settlement_items si JOIN settlements o ON o.id = si.settlement_id JOIN bookings b ON b.id = si.booking_id JOIN guests g ON g.id = b.guest_id
+     WHERE o.status = 'settled' AND o.id != ? AND si.booking_id IN (SELECT booking_id FROM settlement_items WHERE settlement_id = ?)`, s.id, s.id);
+  if (taken.length) throw new HttpError(409, `already settled by another payout: ${taken.map((t) => `${t.name} (${t.payout_ref})`).join(", ")}. Delete this draft.`);
   const now = nowIso();
   const b = new Batch(c.env.DB, actor);
   const created: string[] = [];
@@ -134,6 +138,20 @@ r.post("/:id/settle", async (c) => {
 });
 
 /** Undo removes every expense, credit and receipt the settlement created — the duplicate-₹806 class of error cannot recur. */
+/** Delete a draft: nothing has been posted yet, so the payout and its stay list simply go. */
+r.delete("/:id", async (c) => {
+  const p = c.get("property"); const actor = c.get("actor");
+  const s: any = await one(c.env.DB, "SELECT * FROM settlements WHERE id = ? AND property_id = ?", c.req.param("id"), p.id);
+  if (!s) throw new HttpError(404, "settlement not found");
+  if (s.status !== "draft") throw new HttpError(409, `only a draft can be deleted; this one is ${s.status} (use Undo)`);
+  const b = new Batch(c.env.DB, actor);
+  b.add("DELETE FROM settlement_items WHERE settlement_id = ?", s.id);
+  b.add("DELETE FROM settlements WHERE id = ?", s.id);
+  b.audit("settlement.delete_draft", "settlement", s.id, { payout_ref: s.payout_ref, expected_paise: s.expected_paise }, null);
+  await b.run();
+  return c.json({ ok: true });
+});
+
 /** The account holding TCS/TDS to recover; created on first use. */
 async function statutoryAccount(db: D1Database, propertyId: string, b: Batch): Promise<string> {
   const a = await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = 'ota_clearing' AND name = 'TCS/TDS to recover'", propertyId);

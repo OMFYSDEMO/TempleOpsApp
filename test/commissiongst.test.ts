@@ -62,6 +62,19 @@ describe("GST on OTA commission", () => {
     await sql("UPDATE money_accounts SET opening_date = '2026-09-01' WHERE id = 'acc_bank'");
   });
 
+  it("refuses to settle a draft whose stay another payout has settled since", async () => {
+    const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Twice Drafted", guest_phone: "9500000084", channel_code: "agoda", external_ref: "AG-777004", check_in: "2027-07-10", check_out: "2027-07-11", rooms: [{ room_id: "loc_r1", nightly_rate_paise: 1000000 }] });
+    const d1 = await ok("trupti", "POST", "/api/settlements", { channel_code: "agoda", booking_ids: [b.booking.id], payout_ref: "AGODA-DUP-1", payout_on: "2027-07-20" });
+    const d2 = await ok("trupti", "POST", "/api/settlements", { channel_code: "agoda", booking_ids: [b.booking.id], payout_ref: "AGODA-DUP-2", payout_on: "2027-07-20" });
+    await ok("trupti", "POST", `/api/settlements/${d1.id}/settle`, {});
+    expect((await api("trupti", "POST", `/api/settlements/${d2.id}/settle`, {})).status).toBe(409);
+    expect((await sql("SELECT COUNT(*) AS n FROM payments WHERE booking_id = ? AND method = 'ota' AND status != 'void'", b.booking.id))[0].n).toBe(1);
+    // The stale draft is deleted; a settled one cannot be.
+    await ok("trupti", "DELETE", `/api/settlements/${d2.id}`);
+    expect((await sql("SELECT COUNT(*) AS n FROM settlements WHERE id = ?", d2.id))[0].n).toBe(0);
+    expect((await api("trupti", "DELETE", `/api/settlements/${d1.id}`)).status).toBe(409);
+  });
+
   it("refuses a payout dated before a stay it is said to cover", async () => {
     const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Later Guest", guest_phone: "9500000082", channel_code: "agoda", external_ref: "AG-777002", check_in: "2027-09-10", check_out: "2027-09-11", rooms: [{ room_id: "loc_r4", nightly_rate_paise: 1000000 }] });
     const r = await api("trupti", "POST", "/api/settlements", { channel_code: "agoda", booking_ids: [b.booking.id], payout_ref: "AGODA-OLD-1", payout_on: "2027-08-29" });
