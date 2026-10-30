@@ -75,10 +75,9 @@ describe("GST on OTA commission", () => {
     expect((await api("trupti", "DELETE", `/api/settlements/${d1.id}`)).status).toBe(409);
   });
 
-  it("refuses a payout dated before a stay it is said to cover", async () => {
-    const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Later Guest", guest_phone: "9500000082", channel_code: "agoda", external_ref: "AG-777002", check_in: "2027-09-10", check_out: "2027-09-11", rooms: [{ room_id: "loc_r4", nightly_rate_paise: 1000000 }] });
-    const r = await api("trupti", "POST", "/api/settlements", { channel_code: "agoda", booking_ids: [b.booking.id], payout_ref: "AGODA-OLD-1", payout_on: "2027-08-29" });
-    expect(r.status).toBe(409);
-    expect((await sql("SELECT COUNT(*) AS n FROM settlements WHERE payout_ref = 'AGODA-OLD-1'"))[0].n).toBe(0);
+  it("accepts a payout made before the stay: Cleartrip pays ahead of check-in", async () => {
+    const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Paid Ahead", guest_phone: "9500000082", channel_code: "agoda", external_ref: "AG-777002", check_in: "2027-09-10", check_out: "2027-09-11", rooms: [{ room_id: "loc_r4", nightly_rate_paise: 1000000 }] });
+    const r = await api("trupti", "POST", "/api/settlements", { channel_code: "agoda", booking_ids: [b.booking.id], payout_ref: "AGODA-AHEAD-1", payout_on: "2027-08-29" });
+    expect(r.status).toBe(201);
   });
 });
