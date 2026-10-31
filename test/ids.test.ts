@@ -16,7 +16,7 @@ describe("Guest IDs", () => {
 
   it("desk photographs an Aadhaar at check-in; sales and owner can see it; the accountant cannot", async () => {
     const today = (await ok("prachi", "GET", "/api/me")).property.today;
-    const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Id Guest", guest_phone: "9300000001", check_in: today, check_out: today.slice(0, 8) + String(Number(today.slice(8)) + 1).padStart(2, "0"), rooms: [{ room_id: "loc_r3", nightly_rate_paise: 550000 }] });
+    const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Id Guest", guest_phone: "9300000001", check_in: today, check_out: new Date(Date.parse(today) + 86_400_000).toISOString().slice(0, 10), rooms: [{ room_id: "loc_r3", nightly_rate_paise: 550000 }] });
     bookingId = b.booking.id;
     await ok("sindhu", "POST", `/api/bookings/${bookingId}/check-in`);
     // Property desk sees the stay with no ID on its queue.

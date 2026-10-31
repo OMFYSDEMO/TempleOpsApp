@@ -377,3 +377,6 @@ table.t .pills { display: flex; gap: 4px; flex-wrap: wrap; }
 @media (max-width: 760px) { .steps { grid-template-columns: 1fr; } .checklist li { flex-wrap: wrap; } .checklist li > .btn { margin-left: 52px; } }
 .drawer > footer .actions { flex-wrap: nowrap; } .drawer > footer .total small.need { color: var(--amb); font-weight: 600; }
 @media (max-width: 600px) { .drawer > footer .actions .btn:not(.primary) { display: none; } }
+.tasknotes { margin: 4px 0 10px; padding: 10px 12px; border-radius: 12px; background: var(--paper); font-size: .9333rem; }
+.tasknotes .pre { line-height: 1.55; }
+.noteinput { padding: 9px 12px; border-radius: 10px; border: 1px solid var(--field-line); background: var(--card); color: var(--ink); font: inherit; }

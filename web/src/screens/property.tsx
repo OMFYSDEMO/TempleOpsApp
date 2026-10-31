@@ -135,6 +135,16 @@ export function Invoices({ }: { me: Me; refs: Ref }) {
   </>;
 }
 
+/** A task's notes log (each line: when · who: what) and a box to add the next note. */
+function TaskNotes({ t, onAdded }: { t: any; onAdded: () => Promise<void> | void }) {
+  const [text, setText] = useState("");
+  const add = () => run(async () => { await post(`/tasks/${t.id}/notes`, { text }); setText(""); await onAdded(); }, "Note added");
+  return <div className="tasknotes">
+    {t.notes ? <div className="pre">{t.notes}</div> : <div className="muted">No notes yet.</div>}
+    <div className="actions" style={{ marginTop: "8px" }}><input aria-label={`Add a note to ${t.title}`} placeholder="Add a note: what was found, who came, parts ordered…" value={text} onChange={(e: any) => setText(e.currentTarget.value)} style={{ flex: 1, minWidth: "200px" }} className="noteinput" /><Btn small disabled={!text.trim()} onClick={add}>Add note</Btn></div>
+  </div>;
+}
+
 export function Tasks({ refs }: { me: Me; refs: Ref }) {
   const q = useLoad(() => get("/tasks"), []);
   const done = useLoad(() => get("/tasks?status=done"), []);
@@ -142,15 +152,16 @@ export function Tasks({ refs }: { me: Me; refs: Ref }) {
   const setStatus = (id: string, status: string, extra?: any) => run(async () => { await post(`/tasks/${id}/status`, { status, ...extra }); await Promise.all([q.reload(), done.reload()]); }, status === "done" ? "Done · logged" : "Started");
   return <>
     <h1>Tasks <small>housekeeping and maintenance; marking one done can attach the bill and record the expense</small></h1>
-    {!q.data ? <Loading error={q.error} /> : q.data.tasks.length === 0 ? <Empty>No open tasks. Use + to add one.</Empty> : q.data.tasks.map((t: any) => <Card key={t.id} tone={t.priority === "high" ? "bad" : undefined} title={<>{t.kind} · {t.location_name} {t.priority === "high" && <Status s="high" />}<Status s={t.status} /></>} sub={<>{t.title}{t.due_on ? ` · due ${fmtDate(t.due_on)}` : ""}{t.photo_key ? " · photo attached" : ""}</>}>
+    {!q.data ? <Loading error={q.error} /> : q.data.tasks.length === 0 ? <Empty>No open tasks. Use + to add one.</Empty> : q.data.tasks.map((t: any) => <Card key={t.id} tone={t.priority === "high" ? "bad" : undefined} title={<>{t.kind} · {t.location_name}{t.equipment_name ? ` · ${t.equipment_name}` : ""} {t.priority === "high" && <Status s="high" />}<Status s={t.status} /></>} sub={<>{t.title}{t.due_on ? ` · due ${fmtDate(t.due_on)}` : ""}{t.photo_key ? " · photo attached" : ""}</>}>
+      <TaskNotes t={t} onAdded={() => q.reload()} />
       {t.status !== "done" && <details><summary>Done + attach bill (posts from petty cash)</summary>
         <div className="grid two"><Field label="Amount incl. GST (₹)"><input inputMode="decimal" value={bill[t.id]?.amount ?? ""} onChange={(e: any) => setBill({ ...bill, [t.id]: { ...(bill[t.id] ?? { vendor: "", gstin: "" }), amount: e.currentTarget.value } })} /></Field><Field label="Vendor"><input value={bill[t.id]?.vendor ?? ""} onChange={(e: any) => setBill({ ...bill, [t.id]: { ...(bill[t.id] ?? { amount: "", gstin: "" }), vendor: e.currentTarget.value } })} /></Field>
         <Field label="Vendor GSTIN (format-validated)"><input value={bill[t.id]?.gstin ?? ""} onChange={(e: any) => setBill({ ...bill, [t.id]: { ...(bill[t.id] ?? { amount: "", vendor: "" }), gstin: e.currentTarget.value } })} /></Field><Field label="Bill photo"><input type="file" accept="image/*" capture="environment" onChange={async (e: any) => { const f = e.currentTarget.files?.[0]; if (f) { const key = await uploadFile(f, "bill"); setBill({ ...bill, [t.id]: { ...(bill[t.id] ?? { amount: "", vendor: "", gstin: "" }), photo: key } }); toast("Photo attached"); } }} /></Field></div>
         <div className="actions end"><Btn kind="primary" onClick={() => setStatus(t.id, "done", bill[t.id]?.amount ? { expense: { amount_paise: Math.round(Number(bill[t.id].amount) * 100), category: "repairs", vendor_name: bill[t.id].vendor || null, vendor_gstin: bill[t.id].gstin || null, bill_photo_key: bill[t.id].photo ?? null, gst_rate_bp: bill[t.id].gstin ? 1800 : 0 } } : {})}>Done{bill[t.id]?.amount ? ` + post ₹${bill[t.id].amount}` : ""}</Btn></div></details>}
       <div className="actions end">{t.status === "open" && <Btn onClick={() => setStatus(t.id, "in_progress")}>Start</Btn>}{t.status !== "done" && <Btn kind="primary" onClick={() => setStatus(t.id, "done")}>Done</Btn>}</div>
     </Card>)}
-    {q.data && q.data.notes.length > 0 && <Card title="Notes · observations, no status flow">{q.data.notes.map((n: any) => <div className="row" key={n.id}><div><div>{n.location_name} — {n.title}</div><div className="sub">{fmtDate(n.created_at)}</div></div><Status s="noted" /></div>)}</Card>}
-    {done.data && done.data.tasks.length > 0 && <details><summary>Done ({done.data.tasks.length})</summary>{done.data.tasks.map((t: any) => <div className="row" key={t.id}><div>{t.kind} · {t.location_name} · {t.title}</div><div className="sub">{fmtDate(t.done_at)}{t.expense_id ? " · bill posted" : ""}</div></div>)}</details>}
+    {q.data && q.data.notes.length > 0 && <Card title="Notes · observations, no status flow">{q.data.notes.map((n: any) => <div className="row" key={n.id}><div><div>{n.location_name}{n.equipment_name ? ` · ${n.equipment_name}` : ""} — {n.title}</div>{n.notes && <div className="pre muted">{n.notes}</div>}<div className="sub">{fmtDate(n.created_at)}</div></div><Status s="noted" /></div>)}</Card>}
+    {done.data && done.data.tasks.length > 0 && <details><summary>Done ({done.data.tasks.length})</summary>{done.data.tasks.map((t: any) => <div className="row" key={t.id}><div>{t.kind} · {t.location_name}{t.equipment_name ? ` · ${t.equipment_name}` : ""} · {t.title}{t.notes && <div className="pre muted">{t.notes}</div>}</div><div className="sub">{fmtDate(t.done_at)}{t.expense_id ? " · bill posted" : ""}</div></div>)}</details>}
   </>;
 }
 
@@ -198,16 +209,18 @@ export function QuickCapture({ refs }: { me: Me; refs: Ref }) {
   const [open, setOpen] = useState(false); const [verb, setVerb] = useState<null | "expense" | "collect" | "task" | "inout">(null);
   const [amt, setAmt] = useState(0); const [cat, setCat] = useState("fnb"); const [campaign, setCampaign] = useState(""); const [photo, setPhoto] = useState<string | null>(null); const [photoBusy, setPhotoBusy] = useState(false);
   const [loc, setLoc] = useState<string | null>(null); const [tkind, setTkind] = useState("housekeeping"); const [tline, setTline] = useState("");
+  const [teq, setTeq] = useState<string | null>(null); const [tnotes, setTnotes] = useState("");
+  const equipHere = (refs.equipment ?? []).filter((e) => e.location_id === loc);
   const [due, setDue] = useState<any[] | null>(null); const [guest, setGuest] = useState<any>(null); const [method, setMethod] = useState("upi");
   const [desk, setDesk] = useState<any>(null);
   const [queue, setQueue] = useState(readQueue());
   useEffect(() => onQueueChange(() => setQueue(readQueue())), []);
-  const reset = () => { setVerb(null); setAmt(0); setPhoto(null); setLoc(null); setTline(""); setGuest(null); };
+  const reset = () => { setVerb(null); setAmt(0); setPhoto(null); setLoc(null); setTline(""); setTeq(null); setTnotes(""); setGuest(null); };
   const close = () => { setOpen(false); reset(); };
   const pick = async (v: typeof verb) => { setVerb(v); if (v === "collect") setDue((await get("/payments/due")).due); if (v === "inout") setDesk(await get("/bookings/frontdesk/today")); };
   const saveExpense = () => run(async () => { const r = await submit("POST", "/expenses", { category: cat, amount_paise: amt, bill_photo_key: photo, on_date: todayIso(), campaign: cat === "marketing" && campaign.trim() ? campaign.trim() : undefined }, `Expense ${cat} ${inr(amt)}`); toast(r.queued ? "Saved offline · pending sync" : "✓ Saved · audited · petty cash updated"); close(); });
   const saveCollect = () => run(async () => { const r = await submit("POST", "/payments", { booking_id: guest?.booking_id ?? null, method, amount_paise: amt }, `Collect ${inr(amt)} ${guest?.guest_name ?? ""}`); toast(r.queued ? "Saved offline · pending sync" : "✓ Payment posted · fee booked once"); close(); });
-  const saveTask = () => run(async () => { const r = await submit("POST", "/tasks", { kind: tkind, location_id: loc, title: tline || `${tkind} · ${refs.locations.find((l) => l.id === loc)?.name}`, photo_key: photo }, `Task ${tkind}`); toast(r.queued ? "Saved offline · pending sync" : tkind === "note" ? "✓ Noted" : "✓ Task created · Open"); close(); });
+  const saveTask = () => run(async () => { const r = await submit("POST", "/tasks", { kind: tkind, location_id: loc, equipment_id: teq, notes: tnotes.trim() || undefined, title: tline || [tkind, refs.locations.find((l) => l.id === loc)?.name, equipHere.find((e) => e.id === teq)?.name].filter(Boolean).join(" · "), photo_key: photo }, `Task ${tkind}`); toast(r.queued ? "Saved offline · pending sync" : tkind === "note" ? "✓ Noted" : "✓ Task created · Open"); close(); });
   const inout = (id: string, v: "check-in" | "check-out") => run(async () => { const r = await post(`/bookings/${id}/${v}`); toast(v === "check-in" ? "✓ Checked in · logged" : r.balance_due_paise > 0 ? `✓ Checked out · collect ${inr(r.balance_due_paise)}` : "✓ Checked out · housekeeping task created"); if (v === "check-out" && r.balance_due_paise > 0) { setVerb("collect"); setDue((await get("/payments/due")).due); setGuest({ booking_id: id, guest_name: "" }); setAmt(r.balance_due_paise); } else close(); });
   const rooms = refs.locations.filter((l) => l.kind === "room"), areas = refs.locations.filter((l) => l.kind === "area");
   return <>
@@ -222,9 +235,11 @@ export function QuickCapture({ refs }: { me: Me; refs: Ref }) {
       {verb === "collect" && <><h2>Collect payment</h2>{!guest && <div>{(due ?? []).length === 0 ? <Empty>Nobody owes money today.</Empty> : (due ?? []).map((d: any) => <div className="row" key={d.booking_id}><div><div>{d.guest_name}</div><div className="sub">{d.due_today ? "due now" : `advance for ${fmtDate(d.check_in)}`} · balance of {inr(d.gross_paise)} stay</div></div><Btn small kind="primary" onClick={() => { setGuest(d); setAmt(d.balance_paise); }}>{inr(d.balance_paise)}</Btn></div>)}<div className="actions end"><Btn onClick={reset}>← Back</Btn><Btn onClick={() => setGuest({ booking_id: null, guest_name: "walk-in" })}>Walk-in / other</Btn></div></div>}
         {guest && <><div className="sub">{guest.guest_name || "stay"} · tap the figure to change</div><Keypad value={amt} onChange={setAmt} /><Chips value={method} options={METHODS.map(([v, l]) => ({ value: v, label: l }))} onChange={setMethod} /><div className="actions end"><Btn onClick={() => setGuest(null)}>← Back</Btn><Btn kind="gold" disabled={amt <= 0} onClick={saveCollect}>Collected {inr(amt)}</Btn></div></>}</>}
       {verb === "task" && <><h2>Task</h2><label className="btn" style={{ display: "block", textAlign: "center" }}>{photo ? "✓ photo" : "📷 Photo (optional)"}<input type="file" accept="image/*" capture="environment" hidden onChange={async (e: any) => { const f = e.currentTarget.files?.[0]; if (f) setPhoto(await uploadFile(f, "task")); }} /></label>
-        <div className="sub">Where — rooms</div><Chips value={loc} options={rooms.map((r) => ({ value: r.id, label: `${r.name} · ${r.code}` }))} onChange={setLoc} /><div className="sub">Common areas</div><Chips value={loc} options={areas.map((r) => ({ value: r.id, label: r.name }))} onChange={setLoc} />
+        <div className="sub">Where — rooms</div><Chips value={loc} options={rooms.map((r) => ({ value: r.id, label: `${r.name} · ${r.code}` }))} onChange={(v) => { setLoc(v); setTeq(null); }} /><div className="sub">Common areas</div><Chips value={loc} options={areas.map((r) => ({ value: r.id, label: r.name }))} onChange={(v) => { setLoc(v); setTeq(null); }} />
+        {equipHere.length > 0 && <><div className="sub">Which equipment (optional)</div><Chips label="Equipment" value={teq} options={equipHere.map((e) => ({ value: e.id, label: e.name }))} onChange={(v) => setTeq(teq === v ? null : v)} /></>}
         <div className="sub">What</div><Chips value={tkind} options={[{ value: "housekeeping", label: "Housekeeping" }, { value: "maintenance", label: "Maintenance" }, { value: "repair", label: "Repair" }, { value: "note", label: "Note" }]} onChange={setTkind} />
-        <Field label="One line (optional)"><input value={tline} onChange={(e: any) => setTline(e.currentTarget.value)} /></Field>
+        <Field label="What needs doing (one line, optional)"><input value={tline} onChange={(e: any) => setTline(e.currentTarget.value)} placeholder="e.g. fridge not cooling" /></Field>
+        <Field label="Notes (optional)" hint="what you saw, who was called, parts needed; more notes can be added later on the Tasks screen"><textarea rows={3} value={tnotes} onChange={(e: any) => setTnotes(e.currentTarget.value)} /></Field>
         <div className="actions end"><Btn onClick={reset}>← Back</Btn><Btn kind="gold" disabled={!loc} onClick={saveTask}>Save {tkind === "note" ? "note" : "task"}</Btn></div></>}
       {verb === "inout" && <><h2>Check in / out</h2>{!desk ? <Loading /> : <>{desk.arrivals.map((b: any) => <div className="row" key={b.id}><div><div>{b.guest_name}</div><div className="sub">arriving · {b.room_names} · {b.paid_paise >= b.gross_paise ? "paid ✓" : b.collection_type === "channel_collect" ? "OTA" : `balance ${inr(b.gross_paise - b.paid_paise)}`}</div></div><Btn small kind="primary" onClick={() => inout(b.id, "check-in")}>Check in</Btn></div>)}
         {[...desk.departures, ...desk.in_house].map((b: any) => <div className="row" key={b.id}><div><div>{b.guest_name}</div><div className="sub">leaving · {b.collection_type === "channel_collect" ? "OTA collect — nothing to take" : `balance ${inr(b.gross_paise - b.paid_paise)}`}</div></div><Btn small kind="primary" onClick={() => inout(b.id, "check-out")}>Check out</Btn></div>)}

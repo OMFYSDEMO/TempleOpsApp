@@ -11,10 +11,10 @@ const STATUSES = ["open", "in_progress", "done", "noted"] as const;
 r.get("/", async (c) => {
   const p = c.get("property");
   const status = c.req.query("status");
-  const rows = await all(c.env.DB, `SELECT t.*, l.name AS location_name, l.code AS location_code, u.name AS assigned_name FROM tasks t JOIN locations l ON l.id = t.location_id LEFT JOIN users u ON u.id = t.assigned_to
+  const rows = await all(c.env.DB, `SELECT t.*, l.name AS location_name, l.code AS location_code, q.name AS equipment_name, u.name AS assigned_name FROM tasks t JOIN locations l ON l.id = t.location_id LEFT JOIN equipment q ON q.id = t.equipment_id LEFT JOIN users u ON u.id = t.assigned_to
     WHERE t.property_id = ? ${status ? "AND t.status = ?" : "AND t.status IN ('open','in_progress')"} ORDER BY CASE t.priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, t.due_on, t.created_at DESC LIMIT 200`,
     ...(status ? [p.id, status] : [p.id]));
-  const notes = await all(c.env.DB, "SELECT t.*, l.name AS location_name FROM tasks t JOIN locations l ON l.id = t.location_id WHERE t.property_id = ? AND t.kind = 'note' ORDER BY t.created_at DESC LIMIT 50", p.id);
+  const notes = await all(c.env.DB, "SELECT t.*, l.name AS location_name, q.name AS equipment_name FROM tasks t JOIN locations l ON l.id = t.location_id LEFT JOIN equipment q ON q.id = t.equipment_id WHERE t.property_id = ? AND t.kind = 'note' ORDER BY t.created_at DESC LIMIT 50", p.id);
   return c.json({ tasks: rows, notes });
 });
 
@@ -26,15 +26,40 @@ r.post("/", async (c) => {
   const kind = oneOf(x.kind, "kind", KINDS);
   const loc = await one<{ id: string; name: string }>(c.env.DB, "SELECT id, name FROM locations WHERE id = ? AND property_id = ? AND active = 1", str(x.location_id, "location_id"), p.id);
   if (!loc) throw new HttpError(400, "unknown location");
+  // The machine the job is about, if the area has equipment listed (the kitchen's fridge, say).
+  const equipmentId = optStr(x.equipment_id, "equipment_id");
+  const equip = equipmentId ? await one<{ id: string; name: string }>(c.env.DB, "SELECT id, name FROM equipment WHERE id = ? AND location_id = ? AND property_id = ? AND active = 1", equipmentId, loc.id, p.id) : null;
+  if (equipmentId && !equip) throw new HttpError(400, "that equipment is not in this area");
+  const firstNote = str(x.notes, "notes", { optional: true, max: 2000 }).trim() || null;
   const tid = id("tsk");
   const status = kind === "note" ? "noted" : "open";
   const b = new Batch(c.env.DB, actor);
-  b.add("INSERT INTO tasks (id, property_id, location_id, kind, title, priority, status, due_on, photo_key, assigned_to, created_by, idempotency_key, done_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    tid, p.id, loc.id, kind, str(x.title ?? `${kind} · ${loc.name}`, "title", { max: 300 }), oneOf(x.priority ?? "normal", "priority", ["low", "normal", "high"] as const), status,
+  b.add("INSERT INTO tasks (id, property_id, location_id, equipment_id, notes, kind, title, priority, status, due_on, photo_key, assigned_to, created_by, idempotency_key, done_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    tid, p.id, loc.id, equip?.id ?? null, firstNote ? noteLine(actor.name, firstNote, p.timezone) : null, kind, str(x.title ?? `${kind} · ${loc.name}${equip ? ` · ${equip.name}` : ""}`, "title", { max: 300 }), oneOf(x.priority ?? "normal", "priority", ["low", "normal", "high"] as const), status,
     optStr(x.due_on, "due_on"), optStr(x.photo_key, "photo_key"), optStr(x.assigned_to, "assigned_to"), actor.id, idem, kind === "note" ? nowIso() : null);
-  b.audit("task.create", "task", tid, null, { kind, location: loc.name, status });
+  b.audit("task.create", "task", tid, null, { kind, location: loc.name, equipment: equip?.name ?? null, status, notes: firstNote ?? null });
   await b.run();
   return c.json({ id: tid, status }, 201);
+});
+
+/** One line of a task's notes log: when (property time), who, what. */
+function noteLine(who: string, text: string, tz: string): string {
+  const at = new Date().toLocaleString("en-IN", { timeZone: tz || "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${at} · ${who}: ${text.trim()}`;
+}
+
+/** Add a note to a task (what was found, a part ordered, the technician's visit); the log keeps every note in order. */
+r.post("/:id/notes", async (c) => {
+  const p = c.get("property"); const actor = c.get("actor");
+  const t: any = await one(c.env.DB, "SELECT id, notes FROM tasks WHERE id = ? AND property_id = ?", c.req.param("id"), p.id);
+  if (!t) throw new HttpError(404, "task not found");
+  const x = await body(c);
+  const line = noteLine(actor.name, str(x.text, "text", { max: 2000 }), p.timezone);
+  const b = new Batch(c.env.DB, actor);
+  b.add("UPDATE tasks SET notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END, updated_at = ? WHERE id = ?", line, line, nowIso(), t.id);
+  b.audit("task.note", "task", t.id, null, { note: line });
+  await b.run();
+  return c.json({ ok: true, note: line });
 });
 
 /**

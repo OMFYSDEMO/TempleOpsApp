@@ -22,12 +22,13 @@ r.get("/me", async (c) => {
 
 r.get("/ref", async (c) => {
   const p = c.get("property");
-  const [locations, channels, accounts, users, rateCards] = await Promise.all([
+  const [locations, channels, accounts, users, rateCards, equipment] = await Promise.all([
     all(c.env.DB, "SELECT id, kind, code, name, sort FROM locations WHERE property_id = ? AND active = 1 ORDER BY kind DESC, sort", p.id),
     all(c.env.DB, "SELECT id, code, name, collection_type, commission_bp, commission_gst_bp, payment_fee_bp, tcs_bp, tds_bp FROM channels WHERE property_id = ? AND active = 1", p.id),
     all(c.env.DB, "SELECT id, kind, name, holder_role, is_default, account_no FROM money_accounts WHERE property_id = ? AND active = 1 ORDER BY kind, is_default DESC, name", p.id),
     all(c.env.DB, "SELECT id, name, role FROM users WHERE property_id = ? AND active = 1", p.id),
     all(c.env.DB, "SELECT id, room_id, name, rate_paise, from_date, to_date, priority FROM rate_cards WHERE property_id = ? ORDER BY room_id, priority", p.id),
+    all(c.env.DB, "SELECT id, location_id, name, sort FROM equipment WHERE property_id = ? AND active = 1 ORDER BY sort, name", p.id),
   ]);
   // The front desk and sales get account names (to say where a UPI landed) but no account numbers, and no OTA commercial terms.
   const fin = allowed(c.get("actor"), "finance");
@@ -35,7 +36,7 @@ r.get("/ref", async (c) => {
     for (const a of accounts as any[]) delete a.account_no;
     for (const ch of channels as any[]) { delete ch.commission_bp; delete ch.commission_gst_bp; delete ch.payment_fee_bp; delete ch.tcs_bp; delete ch.tds_bp; }
   }
-  return c.json({ locations, channels, accounts, users, rate_cards: rateCards, expense_categories: EXPENSE_CATEGORIES, expense_families: EXPENSE_FAMILIES, common_categories: { petty: COMMON_PETTY, bank: COMMON_BANK } });
+  return c.json({ locations, equipment, channels, accounts, users, rate_cards: rateCards, expense_categories: EXPENSE_CATEGORIES, expense_families: EXPENSE_FAMILIES, common_categories: { petty: COMMON_PETTY, bank: COMMON_BANK } });
 });
 
 r.get("/notifications", async (c) => {
@@ -222,6 +223,54 @@ admin.delete("/rate-cards/:id", async (c) => {
   await b.run();
   return c.json({ ok: true });
 });
+/** Common areas and the equipment in them (kitchen: microwave, oven, fridge…), for maintenance tasks. */
+admin.post("/locations", async (c) => {
+  const p = c.get("property"); const x = await body(c);
+  const name = str(x.name, "name", { max: 60 }).trim();
+  const code = (optStr(x.code, "code") ?? name).toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 12) || "AREA";
+  if (await one(c.env.DB, "SELECT id FROM locations WHERE property_id = ? AND active = 1 AND lower(name) = lower(?)", p.id, name)) throw new HttpError(409, `${name} already exists`);
+  const sort = ((await one<{ s: number }>(c.env.DB, "SELECT COALESCE(MAX(sort), 0) AS s FROM locations WHERE property_id = ?", p.id))?.s ?? 0) + 10;
+  const lid = id("loc");
+  const b = new Batch(c.env.DB, c.get("actor"));
+  b.add("INSERT INTO locations (id, property_id, kind, code, name, sort, active) VALUES (?,?,'area',?,?,?,1)", lid, p.id, code, name, sort);
+  b.audit("location.create", "location", lid, null, { kind: "area", name, code });
+  await b.run();
+  return c.json({ id: lid, name, code }, 201);
+});
+admin.post("/equipment", async (c) => {
+  const p = c.get("property"); const x = await body(c);
+  const loc = await one<{ id: string; name: string }>(c.env.DB, "SELECT id, name FROM locations WHERE id = ? AND property_id = ? AND active = 1", str(x.location_id, "location_id"), p.id);
+  if (!loc) throw new HttpError(400, "unknown area");
+  const names = (Array.isArray(x.names) ? x.names : [x.name]).map((n: unknown) => str(n, "name", { max: 60 }).trim()).filter(Boolean);
+  if (!names.length) throw new HttpError(400, "name is required");
+  const have = new Set((await all<{ name: string }>(c.env.DB, "SELECT lower(name) AS name FROM equipment WHERE location_id = ? AND active = 1", loc.id)).map((e) => e.name));
+  const b = new Batch(c.env.DB, c.get("actor"));
+  const ids: string[] = [];
+  names.forEach((name: string, i: number) => {
+    if (have.has(name.toLowerCase())) return;
+    have.add(name.toLowerCase());
+    const eid = id("eqp"); ids.push(eid);
+    b.add("INSERT INTO equipment (id, property_id, location_id, name, sort) VALUES (?,?,?,?,?)", eid, p.id, loc.id, name, (i + 1) * 10);
+    b.audit("equipment.create", "equipment", eid, null, { location: loc.name, name });
+  });
+  if (ids.length) await b.run();
+  return c.json({ ids }, 201);
+});
+admin.patch("/equipment/:id", async (c) => {
+  const p = c.get("property"); const x = await body(c);
+  const e: any = await one(c.env.DB, "SELECT * FROM equipment WHERE id = ? AND property_id = ?", c.req.param("id"), p.id);
+  if (!e) throw new HttpError(404, "equipment not found");
+  const after: Record<string, unknown> = {};
+  if (x.name !== undefined) after.name = str(x.name, "name", { max: 60 }).trim();
+  if (x.active !== undefined) after.active = x.active ? 1 : 0;
+  if (!Object.keys(after).length) throw new HttpError(400, "nothing to update");
+  const b = new Batch(c.env.DB, c.get("actor"));
+  b.add(`UPDATE equipment SET ${Object.keys(after).map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, ...Object.values(after), e.id);
+  b.audit("equipment.update", "equipment", e.id, { name: e.name, active: e.active }, after);
+  await b.run();
+  return c.json({ ok: true });
+});
+
 admin.patch("/channels/:id", async (c) => {
   const p = c.get("property"); const x = await body(c);
   const ch: any = await one(c.env.DB, "SELECT * FROM channels WHERE id = ? AND property_id = ?", c.req.param("id"), p.id);

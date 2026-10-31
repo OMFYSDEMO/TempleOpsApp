@@ -88,6 +88,7 @@ See money beyond a booking's balance, edit an approved booking's amount, see exp
 - Bank-paid bills (electricity, subscriptions, fees) are the owner's to record, not yours.
 
 ### Tasks
+- **Kitchen equipment:** press **+ → Task**, choose **Kitchen**, then the machine (Microwave, Oven, Fridge, Washing Machine, Water Purifier), what needs doing and a note. On the Tasks screen, **Add note** keeps a dated log on the task: what was found, who came, parts ordered. The owner adds areas and equipment under Settings → Areas & equipment.
 - Housekeeping, maintenance and anything else with a room or area, a title and a due date. Mark **done** with a photo where it helps. A maintenance bill paid from petty cash can be attached at the same time.
 
 ### You cannot
