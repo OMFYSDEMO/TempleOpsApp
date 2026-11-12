@@ -66,6 +66,47 @@ describe("Bank transaction alerts", () => {
     expect(acct.reported_at).toBe("2026-10-26T10:00:00+05:30");
   });
 
+  // IDFC's short alert for the same movement: no payer, no reference, time to the minute, balance with "CR".
+  const plain = (amount: string, when: string, balance: string, dir = "credited") =>
+    `Dear MIDHURST HOSPITALITY PRIVATE LIMITED,\nGreetings from IDFC FIRST Bank.\nYour A/C XXXXXXX3390 has been ${dir} with INR ${amount} on ${when}. New balance is INR ${balance}CR.\nAlways You First,\nTeam IDFC FIRST Bank`;
+  const ingest = (body: { html?: string; text?: string }, mid: string) => ok("shaji", "POST", "/api/inbox/ingest", { from: "transaction.alerts@idfcfirstbank.com", subject: "Transaction alert from IDFC FIRST Bank", ...body, message_id: `<${mid}@idfc>` });
+  const linesOn = (date: string, amount: number) => sql("SELECT id, description, reference, status FROM bank_statement_lines WHERE on_date = ? AND amount_paise = ?", date, amount);
+
+  it("the bank's short alert after the detailed one for the same movement adds no second line", async () => {
+    await ingest({ html: alert("29,071.26", "TRAVELSCAPE LLC", "CITIN26758802494", "620,783.20", "11-11-2026 02:33:02") }, "twin-a1");
+    const second = await ingest({ text: plain("29,071.26", "11/11/2026 02:33", "6,20,783.20") }, "twin-a2");
+    expect(second.status).toBe("duplicate");
+    const lines = await linesOn("2026-11-11", 2907126);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].reference).toBe("CITIN26758802494");
+  });
+
+  it("the detailed alert after the short one gives the existing line its payer and reference", async () => {
+    await ingest({ text: plain("3,000.00", "11/11/2026 02:43", "6,17,783.20", "debited") }, "twin-b1");
+    const second = await ingest({ html: alert("3,000.00", "SINDHU RAJ K", "IDFB6315M7167601", "617,783.20", "11-11-2026 02:43:22", "debited") }, "twin-b2");
+    expect(second.status).toBe("duplicate");
+    const lines = await linesOn("2026-11-11", -300000);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ reference: "IDFB6315M7167601", description: "NEFT SINDHU RAJ K IDFB6315M7167601" });
+  });
+
+  it("two real movements of the same amount in the same minute stay two lines (the balances differ)", async () => {
+    await ingest({ html: alert("700.00", "GUEST ONE", "N0000TWINC01", "100,700.00", "12-11-2026 09:15:01") }, "twin-c1");
+    const second = await ingest({ text: plain("700.00", "12/11/2026 09:15", "1,01,400.00") }, "twin-c2");
+    expect(second.status).toBe("approved");
+    expect(await linesOn("2026-11-12", 70000)).toHaveLength(2);
+  });
+
+  it("an Airpay detailed alert after the short one settles the existing line instead of adding one", async () => {
+    await ingest({ text: plain("1,234.00", "13/11/2026 17:02", "5,03,881.33") }, "twin-d1");
+    const second = await ingest({ html: alert("1,234.00", "AIRPAY PAYMENT SERVICES PRIVATE", "CMS0000TWIN0001", "503,881.33", "13-11-2026 17:02:09") }, "twin-d2");
+    expect(second.auto.what).toBe("settled");
+    const lines = await linesOn("2026-11-13", 123400);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ status: "matched", reference: "CMS0000TWIN0001" });
+    expect((await sql("SELECT COUNT(*) AS n FROM transfers WHERE reference = 'CMS0000TWIN0001'"))[0].n).toBe(1);
+  });
+
   it("an alert for an account AVOS cannot place waits with the reason", async () => {
     await ok("shaji", "POST", "/api/admin/accounts", { name: "Yes Bank", account_no: "4411" });
     const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "transaction.alerts@idfcfirstbank.com", subject: "Transaction alert from IDFC FIRST Bank", html: alert("100.00", "SOMEONE", "REF77777777", "1.00").replace("XXXXXXX3390", "XXXXXXX9999") });

@@ -32,6 +32,23 @@ export const refArgs = (ref: string) => [ref, `${ref} (%`, `% (${ref})`];
 export type AutoResult = { applied: true; what: "booked" | "cancelled" | "paid" | "settled" | "statement line"; id: string } | { applied: false; note: string };
 
 /** Automation acts for the owner (FKs need a real user) but signs the audit as itself. */
+/**
+ * IDFC often sends two alerts for one movement: a short one ("credited with INR 29,071.26 on 11/11/2026 02:33") and a
+ * detailed one with the NEFT reference and payer. They agree on account, date, amount, minute and the new balance, and
+ * exactly one of them carries a reference. Returns the line the other alert already made, or null. Without a balance and
+ * a time on this alert nothing is assumed: two real movements of the same amount stay two lines.
+ */
+async function twinAlertLine(db: D1Database, propertyId: string, accountId: string, d: Record<string, any>, signed: number) {
+  if (d.balance_paise == null || !d.at_time) return null;
+  return one<{ id: string; description: string; reference: string | null; status: string }>(db,
+    `SELECT l.id, l.description, l.reference, l.status FROM bank_statement_lines l JOIN inbox_items i ON l.run_id = 'alert:' || i.id
+      WHERE l.property_id = ? AND l.account_id = ? AND l.on_date = ? AND l.amount_paise = ? AND i.kind = 'bank_alert'
+        AND json_extract(i.parsed_json, '$.balance_paise') = ? AND substr(json_extract(i.parsed_json, '$.at_time'), 1, 5) = ?
+        AND (l.reference IS NULL) <> (? IS NULL)
+      ORDER BY l.created_at LIMIT 1`,
+    propertyId, accountId, String(d.on_date), signed, Number(d.balance_paise), String(d.at_time).slice(0, 5), d.reference ?? null);
+}
+
 async function automationActor(db: D1Database, propertyId: string): Promise<Actor | null> {
   const u = await one<{ id: string; name: string }>(db, "SELECT id, name FROM users WHERE property_id = ? AND active = 1 ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'sales' THEN 1 ELSE 2 END, id LIMIT 1", propertyId);
   return u ? { id: u.id, property_id: propertyId, email: "inbox-automation", name: "Inbox automation", role: "owner", via: "automation" } : null;
@@ -230,8 +247,18 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
         await b.run();
         return { applied: false, note: "already recorded" };
       }
-      const lid = id("bsl");
+      const twin = await twinAlertLine(db, property.id, acct.id, d, signed);
       const isAirpay = signed > 0 && /airpay/i.test(String(d.counterparty ?? ""));
+      // The bank's other alert for this movement is already a line. A detailed alert arriving second gives that line its
+      // payer and reference (and, for Airpay, settles it); either way this email adds no second line.
+      if (twin && !(isAirpay && twin.status !== "matched")) {
+        if (d.reference && !twin.reference) b.add("UPDATE bank_statement_lines SET description = ?, reference = ? WHERE id = ?", description, d.reference, twin.id);
+        b.add("UPDATE inbox_items SET status = 'duplicate', auto_note = ?, external_ref = ? WHERE id = ?", `the bank's other alert for the same movement is already on the statement (${twin.description})`, d.reference ?? null, item.id);
+        b.audit("inbox.auto_bank", "inbox_item", item.id, { status: "routed" }, { status: "duplicate", twin_line_id: twin.id, reference_added: d.reference && !twin.reference ? d.reference : null });
+        await b.run();
+        return { applied: false, note: "already recorded (the bank's other alert for the same movement)" };
+      }
+      const lid = twin ? twin.id : id("bsl");
       if (isAirpay) {
         // Airpay settles the gateway float to the bank: a transfer from Airpay clearing, matched to this line at once.
         const gw = await one<{ id: string }>(db, "SELECT id FROM money_accounts WHERE property_id = ? AND kind = 'gateway' AND active = 1 ORDER BY id LIMIT 1", property.id);
@@ -240,7 +267,9 @@ export async function autoApply(db: D1Database, property: PropertyRow, item: { i
         b.add("INSERT INTO transfers (id, property_id, from_account_id, to_account_id, amount_paise, on_date, reference, note, recorded_by, idempotency_key) VALUES (?,?,?,?,?,?,?,?,?,?)",
           tid, property.id, gw.id, acct.id, signed, d.on_date, d.reference ?? null, `Airpay settlement · from the ${d.bank ?? "bank"} alert`, actor.id, `bankalert:${item.id}`);
         b.audit("transfer.create", "transfer", tid, null, { from: "gateway", to: acct.name, amount_paise: signed, reference: d.reference, via: "bank alert" });
-        b.add("INSERT INTO bank_statement_lines (id, property_id, account_id, run_id, on_date, description, amount_paise, reference, line_hash, status, tier, match_kind, match_id, match_json, matched_by, matched_at) VALUES (?,?,?,?,?,?,?,?,?,'matched',1,'transfer',?,?,?,?)",
+        if (twin) b.add("UPDATE bank_statement_lines SET description = ?, reference = ?, status = 'matched', tier = 1, match_kind = 'transfer', match_id = ?, match_json = ?, matched_by = ?, matched_at = ? WHERE id = ?",
+          description, d.reference ?? null, tid, JSON.stringify({ label: "Airpay settlement", via: "bank alert" }), actor.id, now, lid);
+        else b.add("INSERT INTO bank_statement_lines (id, property_id, account_id, run_id, on_date, description, amount_paise, reference, line_hash, status, tier, match_kind, match_id, match_json, matched_by, matched_at) VALUES (?,?,?,?,?,?,?,?,?,'matched',1,'transfer',?,?,?,?)",
           lid, property.id, acct.id, `alert:${item.id}`, d.on_date, description, signed, d.reference ?? null, lineHash, tid, JSON.stringify({ label: "Airpay settlement", via: "bank alert" }), actor.id, now);
         b.add("UPDATE inbox_items SET status = 'approved', auto_applied = 1, auto_note = NULL, external_ref = ? WHERE id = ?", d.reference ?? null, item.id);
         b.audit("inbox.auto_bank", "inbox_item", item.id, { status: "routed" }, { status: "approved", transfer_id: tid, line_id: lid, amount_paise: signed });
