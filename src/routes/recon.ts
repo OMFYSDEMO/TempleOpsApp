@@ -14,6 +14,9 @@ function signFilter(role: string): string {
   return role === "revenue" ? "AND l.amount_paise > 0" : "";
 }
 
+/** Days before the window an already-settled OTA payout may still be paired with a bank credit (posting lag). */
+const SETTLED_PAYOUT_SLACK_DAYS = 10;
+
 export async function candidatesFor(db: D1Database, propertyId: string, accountId: string, from: string, to: string): Promise<Candidate[]> {
   const pays = await all<any>(db, `SELECT p.id, p.amount_paise, p.reference, p.received_on, p.method, p.kind, g.name AS guest_name, e.amount_paise AS fee_paise
      FROM payments p LEFT JOIN guests g ON g.id = p.guest_id LEFT JOIN expenses e ON e.id = p.fee_expense_id
@@ -21,8 +24,12 @@ export async function candidatesFor(db: D1Database, propertyId: string, accountI
   const trf = await all<any>(db, `SELECT t.id, t.amount_paise, t.reference, t.on_date, t.from_account_id, t.to_account_id, fa.name AS from_name, ta.name AS to_name FROM transfers t JOIN money_accounts fa ON fa.id = t.from_account_id JOIN money_accounts ta ON ta.id = t.to_account_id
      WHERE t.property_id = ? AND (t.from_account_id = ? OR t.to_account_id = ?) AND t.voided_at IS NULL AND t.on_date BETWEEN ? AND ?
        AND t.id NOT IN (SELECT match_id FROM bank_statement_lines WHERE match_kind = 'transfer' AND status = 'matched')`, propertyId, accountId, accountId, from, to);
+  // A payout still waiting for its money (draft) can arrive any time. One already settled is only a candidate near
+  // its own payout date: a settled payout from weeks back must not be offered for an unrelated credit today.
   const stl = await all<any>(db, `SELECT s.id, s.expected_paise, s.payout_ref, s.payout_on, s.created_at, ch.name AS channel_name FROM settlements s JOIN channels ch ON ch.id = s.channel_id
-     WHERE s.property_id = ? AND s.status IN ('draft','settled') AND s.id NOT IN (SELECT match_id FROM bank_statement_lines WHERE match_kind = 'settlement' AND status = 'matched')`, propertyId);
+     WHERE s.property_id = ? AND s.id NOT IN (SELECT match_id FROM bank_statement_lines WHERE match_kind = 'settlement' AND status = 'matched')
+       AND (s.status = 'draft' OR (s.status = 'settled' AND COALESCE(s.payout_on, substr(s.created_at, 1, 10)) BETWEEN ? AND ?))`,
+    propertyId, addDays(from, -SETTLED_PAYOUT_SLACK_DAYS), to);
   const exps = await all<any>(db, `SELECT e.id, e.amount_paise, e.reference, e.on_date, e.description, e.vendor_name FROM expenses e WHERE e.property_id = ? AND e.paid_from_account_id = ? AND e.voided_at IS NULL AND e.kind = 'normal' AND e.on_date BETWEEN ? AND ?
        AND e.id NOT IN (SELECT match_id FROM bank_statement_lines WHERE match_kind = 'expense' AND status = 'matched')`, propertyId, accountId, from, to);
   const out: Candidate[] = [];
