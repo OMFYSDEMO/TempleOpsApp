@@ -305,6 +305,7 @@ function BookingDetail({ me, refs, d, rooms, tariffFor, onChange, onClose }: { m
       </div>
       <div className="actions">
         {canDelete && <Btn kind="danger" onClick={remove}>Delete</Btn>}
+        {["provisional", "approved", "checked_in"].includes(b.status) && d.channel.collection_type === "direct" && !b.inbox_item_id && <a className="btn" href={`/api/bookings/${b.id}/voucher`} target="_blank" rel="noopener">Confirmation voucher</a>}
         {["provisional", "approved"].includes(b.status) && <Btn kind="danger" onClick={cancel}>Cancel booking</Btn>}
       </div>
     </div>

@@ -3,6 +3,7 @@ import { Batch, HttpError, all, one, id, assertPeriodOpen } from "../db";
 import { nowIso, todayIn } from "../domain/dates";
 import { createBooking, cancelBooking, loadBooking, paidOnBooking , amendBooking } from "../services/bookings";
 import { allowed } from "../auth";
+import { formatINR } from "../domain/money";
 
 const r = newRouter();
 
@@ -235,6 +236,43 @@ r.post("/:id/check-out", requireCap("frontdesk"), async (c) => {
   await b.run();
   const invoice = await one<{ id: string; number: string }>(c.env.DB, "SELECT id, number FROM invoices WHERE booking_id = ?", bk.id);
   return c.json({ ok: true, collection_type: channel.collection_type, balance_due_paise: collectNow, paid_paise: paid, gross_paise: bk.gross_paise, housekeeping_tasks: taskIds, invoice, next: collectNow > 0 ? "collect" : invoice ? "done" : channel.collection_type === "channel_collect" ? "done" : "invoice" });
+});
+
+/**
+ * Booking confirmation voucher: a printable page the desk sends the guest (as PDF or a WhatsApp screenshot) when the
+ * booking was made in AVOS rather than through STAAH or an OTA. Not a tax invoice: that is issued at check-out.
+ */
+r.get("/:id/voucher", requireCap("bookings_read"), async (c) => {
+  const p = c.get("property");
+  const bk = await loadBooking(c.env.DB, p.id, c.req.param("id"));
+  if (["cancelled", "no_show"].includes(bk.status)) throw new HttpError(409, `booking is ${bk.status}: no voucher`);
+  const guest: any = await one(c.env.DB, "SELECT name, phone, email FROM guests WHERE id = ?", bk.guest_id);
+  const ch = await one<{ name: string; collection_type: string }>(c.env.DB, "SELECT name, collection_type FROM channels WHERE id = ?", bk.channel_id);
+  const rooms = await all<any>(c.env.DB, "SELECT br.nights, br.nightly_rate_paise, br.room_total_paise, br.gst_paise, l.name AS room_name FROM booking_rooms br JOIN locations l ON l.id = br.room_id WHERE br.booking_id = ? ORDER BY l.name", bk.id);
+  const paid = await paidOnBooking(c.env.DB, bk.id);
+  // Only bookings made in AVOS by hand: STAAH, its booking engine and the OTAs send their own voucher.
+  if (ch?.collection_type !== "direct" || bk.inbox_item_id) throw new HttpError(409, "this booking came through STAAH or an OTA: send their voucher");
+  const balance = Math.max(0, bk.gross_paise - paid);
+  const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (x) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[x]!));
+  const day = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  const ref = bk.external_ref || `MV-${bk.id.slice(-6).toUpperCase()}`;
+  const provisional = bk.status === "provisional";
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Booking confirmation ${esc(ref)}</title>
+<style>body{font:14px/1.45 -apple-system,Segoe UI,sans-serif;color:#1C2420;margin:32px;max-width:720px}h1{font-size:20px;margin:0 0 4px}h2{font-size:17px;margin:24px 0 4px}.muted{color:#5a615c}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #DDD8CB}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}.tot td{font-weight:700;border-top:2px solid #14453A}.hdr{display:flex;justify-content:space-between;gap:24px}.box{border:1px solid #DDD8CB;padding:12px;border-radius:8px}.stay{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px}.stay div{border:1px solid #DDD8CB;border-radius:8px;padding:10px}.stay b{display:block;font-size:15px}.warn{background:#f9eeda;border-radius:8px;padding:10px;margin-top:12px}@media print{body{margin:12mm}}</style></head><body>
+<div class="hdr"><div><h1>${esc(p.legal_name || p.name)}</h1><div class="muted">${esc(p.name)} · ${esc(p.address ?? "")}</div></div>
+<div class="box"><div><b>Booking confirmation</b></div><div>Ref ${esc(ref)}</div><div class="muted">${provisional ? "Provisional" : "Confirmed"}</div></div></div>
+${provisional ? '<div class="warn">This booking is provisional and awaits confirmation by the hotel.</div>' : ""}
+<h2>${esc(guest?.name)}</h2><div class="muted">${[guest?.phone, guest?.email].filter(Boolean).map(esc).join(" · ")}</div>
+<div class="stay"><div><span class="muted">Check-in</span><b>${esc(day(bk.check_in))}</b><span class="muted">from 2:00 pm</span></div><div><span class="muted">Check-out</span><b>${esc(day(bk.check_out))}</b><span class="muted">by 11:00 am</span></div><div><span class="muted">Guests</span><b>${bk.adults} adult${bk.adults === 1 ? "" : "s"}${bk.children ? ` · ${bk.children} child${bk.children === 1 ? "" : "ren"}` : ""}</b><span class="muted">${bk.nights} night${bk.nights === 1 ? "" : "s"}</span></div></div>
+<table><thead><tr><th>Room</th><th class="n">Nights</th><th class="n">Rate / night</th><th class="n">Amount</th></tr></thead><tbody>
+${rooms.map((rm) => `<tr><td>${esc(rm.room_name)}</td><td class="n">${rm.nights}</td><td class="n">${formatINR(rm.nightly_rate_paise)}</td><td class="n">${formatINR(rm.room_total_paise)}</td></tr>`).join("")}
+<tr><td>GST</td><td></td><td></td><td class="n">${formatINR(bk.gst_paise)}</td></tr>
+<tr class="tot"><td>Total</td><td></td><td></td><td class="n">${formatINR(bk.gross_paise)}</td></tr>
+<tr><td>Paid</td><td></td><td></td><td class="n">${formatINR(paid)}</td></tr>
+<tr class="tot"><td>${balance > 0 ? "Balance payable at the property" : "Balance"}</td><td></td><td></td><td class="n">${formatINR(balance)}</td></tr></tbody></table>
+<p class="muted">Please carry a government photo ID for every guest (passport and visa for foreign nationals). This is a booking confirmation, not a tax invoice; the invoice is issued at check-out.</p>
+<p class="muted">We look forward to welcoming you.</p></body></html>`;
+  return c.html(html);
 });
 
 export default r;
