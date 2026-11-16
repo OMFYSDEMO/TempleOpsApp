@@ -200,6 +200,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   const [open, setOpen] = useState<string | null>(() => { try { const id = sessionStorage.getItem("avos.openBooking"); if (id) sessionStorage.removeItem("avos.openBooking"); return id; } catch { return null; } });
   const [filter, setFilter] = useState<"upcoming" | "inhouse" | "past" | "cancelled" | "all">(() => (open ? "all" : "upcoming"));
   const [search, setSearch] = useState("");
+  const [onlyMine, setOnlyMine] = useState(false);
   const detail = useLoad(() => open ? get(`/bookings/${open}`) : Promise.resolve(null), [open]);
   const tariffFor = (roomId: string, night: string) => { let best: any = null; for (const c of refs.rate_cards) { if (c.room_id !== roomId) continue; if (c.from_date && night < c.from_date) continue; if (c.to_date && night > c.to_date) continue; if (!best || c.priority > best.priority) best = c; } return best?.rate_paise ?? null; };
   const av = useHolders(f.check_in, f.check_out);
@@ -226,6 +227,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   const all: any[] = q.data?.bookings ?? [];
   const isUpcoming = (b: any) => ["provisional", "approved"].includes(b.status) && b.check_out >= today;
   const list = all.filter((b: any) => {
+    if (onlyMine && b.created_by !== me.actor.id && b.salesperson_id !== me.actor.id) return false;
     if (search && !`${b.guest_name} ${b.guest_phone ?? ""} ${b.external_ref ?? ""}`.toLowerCase().includes(search.toLowerCase())) return false;
     if (filter === "all") return true;
     if (filter === "cancelled") return ["cancelled", "no_show"].includes(b.status);
@@ -241,7 +243,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
       <Btn kind="primary" onClick={() => setNewOpen(true)}>+ New booking</Btn>
     </div>
 
-    <Card title={me.actor.role === "sales" ? "My bookings" : "Bookings"} actions={<input className="search" type="search" aria-label="Search bookings" placeholder="Search guest, phone, reference" value={search} onChange={(e: any) => setSearch(e.currentTarget.value)} />}>
+    <Card title={onlyMine ? "My bookings" : "Bookings"} actions={<><label className="nowrap"><input type="checkbox" checked={onlyMine} onChange={(e: any) => setOnlyMine(e.currentTarget.checked)} /> Only mine</label><input className="search" type="search" aria-label="Search bookings" placeholder="Search guest, phone, reference" value={search} onChange={(e: any) => setSearch(e.currentTarget.value)} /></>}>
       <Chips label="Show" value={filter} options={[{ value: "upcoming", label: `Upcoming · ${counts.upcoming}` }, { value: "inhouse", label: `In house · ${counts.inhouse}` }, { value: "past", label: "Past" }, { value: "cancelled", label: "Cancelled" }, { value: "all", label: "All" }]} onChange={setFilter} />
       {!q.data ? <Loading error={q.error} /> : list.length === 0 ? <Empty>{search ? `No booking matches “${search}”.` : filter === "upcoming" ? "No upcoming stays. New bookings appear here." : "Nothing here."}</Empty> : <ScrollX><table className="t bookings"><thead><tr><th>Guest</th><th>Stay</th><th>Rooms</th><th>Channel</th><th className="num">Balance</th><th>Status</th></tr></thead><tbody>{list.map((b: any) => <tr key={b.id} className={open === b.id ? "open" : ""} onClick={() => setOpen(b.id)}>
         <td><button type="button" className="linkbtn" onClick={(e) => { e.stopPropagation(); setOpen(b.id); }}>{b.guest_name}</button>{b.guest_phone && <small>{b.guest_phone}</small>}</td>
