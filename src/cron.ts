@@ -6,6 +6,7 @@ import { PARSER_VERSION } from "./email/parsers";
 import { reparseItem } from "./routes/inbox";
 import { runEscalations } from "./services/work";
 import { runIdArchive } from "./services/drive";
+import { runAutoInvoices } from "./services/invoices";
 
 /**
  * Every few minutes: release expired holds and quotes, nudge the salesperson at 15 minutes,
@@ -48,6 +49,8 @@ export async function runCron(env: Env) {
     for (const it of stale) { try { await reparseItem(env, p.id, it.id, null); } catch (e) { console.error("inbox re-read failed", it.id, e); } }
     // Guest IDs: 48 hours after a stay ends, move its documents to the owner's Drive and drop the copies here.
     try { await runIdArchive(env, p, now); } catch (e) { console.error("id archive failed", p.id, e); }
+    // Guest invoices: every checked-out stay gets one, dated its check-out, whether or not the guest asks.
+    try { await runAutoInvoices(env.DB, p, now); } catch (e) { console.error("auto invoices failed", p.id, e); }
     // Work queue: raise what has waited past its tolerance to the next role, once.
     try { await runEscalations(env, p, now); } catch (e) { console.error("work escalation failed", p.id, e); }
     if (b.size) await b.run();

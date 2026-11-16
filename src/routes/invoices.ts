@@ -3,49 +3,21 @@ import { Batch, HttpError, all, one, id, nextSequence, assertPeriodOpen } from "
 import { todayIn, nowIso } from "../domain/dates";
 import { formatINR } from "../domain/money";
 import { loadBooking, paidOnBooking } from "../services/bookings";
+import { issueInvoice } from "../services/invoices";
 
 const r = newRouter();
 r.use("*", requireCap("invoices"));
 
-export interface InvoiceLine { description: string; room_id: string; nights: number; rate_paise: number; taxable_paise: number; gst_rate_bp: number; gst_paise: number; }
+import type { InvoiceLine } from "../services/invoices";
+export type { InvoiceLine };
 
-/**
- * Issue the guest invoice at check-out (W6). Number is sequential per FY per property and survives deletes
- * because the sequence is allocated by an atomic upsert and invoices are never deleted, only credited.
- */
+/** Issue the guest invoice (W6), dated the stay's check-out date. AVOS also issues it on its own after check-out (cron). */
 r.post("/bookings/:id", async (c) => {
-  const p = c.get("property"); const actor = c.get("actor");
-  const bk = await loadBooking(c.env.DB, p.id, c.req.param("id"));
-  if (["cancelled", "no_show", "provisional"].includes(bk.status)) throw new HttpError(409, `booking is ${bk.status}`);
-  const existing = await one<{ id: string; number: string }>(c.env.DB, "SELECT id, number FROM invoices WHERE booking_id = ? AND status = 'issued'", bk.id);
-  if (existing) return c.json({ id: existing.id, number: existing.number, duplicate: true });
   const x = await body(c).catch(() => ({} as Record<string, unknown>));
-  const issuedOn = optStr(x.issued_on, "issued_on") ?? todayIn(p.timezone);
-  await assertPeriodOpen(c.env.DB, p.id, issuedOn);
-  const guest: any = await one(c.env.DB, "SELECT * FROM guests WHERE id = ?", bk.guest_id);
-  const rooms = await all<any>(c.env.DB, "SELECT br.*, l.name AS room_name FROM booking_rooms br JOIN locations l ON l.id = br.room_id WHERE br.booking_id = ?", bk.id);
-  const gstApplicable = !!p.gstin;
-  const lines: InvoiceLine[] = rooms.map((rm) => ({
-    description: `${rm.room_name} · ${rm.nights} night(s) × ${formatINR(rm.nightly_rate_paise)}`,
-    room_id: rm.room_id, nights: rm.nights, rate_paise: rm.nightly_rate_paise, taxable_paise: rm.room_total_paise,
-    gst_rate_bp: gstApplicable ? rm.gst_rate_bp : 0, gst_paise: gstApplicable ? rm.gst_paise : 0,
-  }));
-  const taxable = lines.reduce((a, l) => a + l.taxable_paise, 0);
-  const gst = lines.reduce((a, l) => a + l.gst_paise, 0);
-  const total = taxable + gst;
-  // The guest of an OTA-collected stay paid the OTA in full: the invoice shows it paid through the OTA, nothing due.
-  const channel = await one<{ name: string; collection_type: string }>(c.env.DB, "SELECT name, collection_type FROM channels WHERE id = ?", bk.channel_id);
-  const received = channel?.collection_type === "channel_collect" ? total : await paidOnBooking(c.env.DB, bk.id);
-  const { fy, seq } = await nextSequence(c.env.DB, p.id, "invoice", issuedOn, p.fy_start_month);
-  const number = `${p.invoice_prefix}/${fy}/${String(seq).padStart(3, "0")}`;
-  const iid = id("inv");
-  const b = new Batch(c.env.DB, actor);
-  b.add(`INSERT INTO invoices (id, property_id, booking_id, number, fy, seq, issued_on, guest_name, guest_phone, guest_gstin, lines_json, taxable_paise, gst_paise, total_paise, received_paise, balance_paise, gst_applicable, issued_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    iid, p.id, bk.id, number, fy, seq, issuedOn, guest.name, guest.phone, optStr(x.guest_gstin, "guest_gstin"), JSON.stringify(lines), taxable, gst, total, received, total - received, gstApplicable ? 1 : 0, actor.id);
-  b.audit("invoice.issue", "invoice", iid, null, { number, booking_id: bk.id, total_paise: total, gst_applicable: gstApplicable });
-  await b.run();
-  return c.json({ id: iid, number, total_paise: total, received_paise: received, balance_paise: total - received, gst_applicable: gstApplicable }, 201);
+  const r1 = await issueInvoice(c.env.DB, c.get("property"), c.get("actor"), c.req.param("id"), { guestGstin: optStr(x.guest_gstin, "guest_gstin") });
+  if (r1.duplicate) return c.json({ id: r1.id, number: r1.number, duplicate: true });
+  const { duplicate: _d, ...out } = r1;
+  return c.json(out, 201);
 });
 
 r.get("/", async (c) => {
