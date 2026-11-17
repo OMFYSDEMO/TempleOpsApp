@@ -5,6 +5,7 @@ import { createBooking, cancelBooking, loadBooking, paidOnBooking , amendBooking
 import { allowed } from "../auth";
 import { formatINR } from "../domain/money";
 import { openCloseouts } from "../services/staah";
+import { refundQuote, REASONS, type RefundInput } from "../services/refunds";
 
 const r = newRouter();
 
@@ -158,14 +159,33 @@ r.delete("/:id", requireCap("bookings_write"), async (c) => {
   return c.json({ ok: true });
 });
 
+/** What a cancellation would refund: payments, the charges deducted from them, net received, and the policy's answer. */
+r.get("/:id/refund-quote", requireCap("bookings_write"), async (c) => {
+  const reason = oneOf(c.req.query("reason") ?? "guest_cancelled", "reason", REASONS);
+  return c.json(await refundQuote(c.env.DB, c.get("property"), c.req.param("id"), reason));
+});
+
+function refundIn(x: any): RefundInput | undefined {
+  if (!x || typeof x !== "object") return undefined;
+  return { reason_code: oneOf(x.reason_code, "refund.reason_code", REASONS), reason_note: optStr(x.reason_note, "refund.reason_note"), refund_paise: int(x.refund_paise ?? 0, "refund.refund_paise", { min: 0 }),
+    above_policy_reason: optStr(x.above_policy_reason, "refund.above_policy_reason"), payee_name: optStr(x.payee_name, "refund.payee_name"), account_no: optStr(x.account_no, "refund.account_no"),
+    account_no_confirm: optStr(x.account_no_confirm, "refund.account_no_confirm"), ifsc: optStr(x.ifsc, "refund.ifsc"), bank_name: optStr(x.bank_name, "refund.bank_name") };
+}
+
+/** Cancel. When the guest has paid us, the desk must say why, how much is refunded and to which bank account. */
 r.post("/:id/cancel", requireCap("bookings_write"), async (c) => {
   const p = c.get("property"); const x = await body(c);
-  const res = await cancelBooking(c.env.DB, c.get("actor"), p, c.req.param("id"), "cancelled", str(x.reason, "reason"));
+  const refund = refundIn(x.refund);
+  if (!refund) {
+    const q = await refundQuote(c.env.DB, p, c.req.param("id"), "guest_cancelled");
+    if (q.paid_paise > 0 && !q.ota_collected) throw new HttpError(409, "the guest has paid: give the reason, the refund amount and their bank account", { needs_refund: true, quote: q });
+  }
+  const res = await cancelBooking(c.env.DB, c.get("actor"), p, c.req.param("id"), "cancelled", str(x.reason, "reason"), refund);
   return c.json(res);
 });
 r.post("/:id/no-show", requireCap("frontdesk"), async (c) => {
   const p = c.get("property"); const x = await body(c).catch(() => ({} as Record<string, unknown>));
-  const res = await cancelBooking(c.env.DB, c.get("actor"), p, c.req.param("id"), "no_show", optStr(x.reason, "reason") ?? "no show");
+  const res = await cancelBooking(c.env.DB, c.get("actor"), p, c.req.param("id"), "no_show", optStr(x.reason, "reason") ?? "no show", refundIn(x.refund));
   return c.json(res);
 });
 

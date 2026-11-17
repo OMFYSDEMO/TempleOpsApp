@@ -9,7 +9,11 @@ r.use("*", requireCap("approvals"));
 r.get("/", async (c) => {
   const p = c.get("property");
   const status = c.req.query("status") ?? "pending";
-  const rows = await all(c.env.DB, `SELECT a.*, ru.name AS requested_name, du.name AS decided_name FROM approvals a LEFT JOIN users ru ON ru.id = a.requested_by LEFT JOIN users du ON du.id = a.decided_by
+  // A refund carries its request: reason, what was received after charges, the policy, and the bank account to pay.
+  const rows = await all(c.env.DB, `SELECT a.*, ru.name AS requested_name, du.name AS decided_name,
+       rr.reason_code AS rf_reason, rr.reason_note AS rf_note, rr.days_before_arrival AS rf_days, rr.paid_paise AS rf_paid, rr.charges_paise AS rf_charges, rr.net_received_paise AS rf_net,
+       rr.policy_refund_paise AS rf_policy, rr.above_policy_reason AS rf_above, rr.payee_name AS rf_payee, rr.account_no AS rf_account, rr.ifsc AS rf_ifsc, rr.bank_name AS rf_bank
+     FROM approvals a LEFT JOIN users ru ON ru.id = a.requested_by LEFT JOIN users du ON du.id = a.decided_by LEFT JOIN refund_requests rr ON rr.approval_id = a.id
      WHERE a.property_id = ? AND a.status = ? ORDER BY a.created_at DESC LIMIT 100`, p.id, status);
   const recent = await all(c.env.DB, `SELECT a.*, du.name AS decided_name FROM approvals a LEFT JOIN users du ON du.id = a.decided_by WHERE a.property_id = ? AND a.status IN ('approved','returned') ORDER BY a.decided_at DESC LIMIT 20`, p.id);
   return c.json({ approvals: rows, recent });

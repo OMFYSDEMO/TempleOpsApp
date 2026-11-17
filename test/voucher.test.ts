@@ -19,7 +19,7 @@ describe("Booking confirmation voucher", () => {
     expect(html).toContain("Balance payable at the property");
     expect(html).toContain("not a tax invoice");
     expect((await api("sindhu", "GET", `/api/bookings/${id}/voucher`)).status).toBe(200);
-    await ok("prachi", "POST", `/api/bookings/${id}/cancel`, { reason: "test" });
+    await ok("prachi", "POST", `/api/bookings/${id}/cancel`, { reason: "test", refund: { reason_code: "guest_cancelled", refund_paise: 0 } });
     expect((await api("prachi", "GET", `/api/bookings/${id}/voucher`)).status).toBe(409);
   });
 });

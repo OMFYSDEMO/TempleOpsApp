@@ -15,11 +15,27 @@ export function Approvals({ me, refs }: { me: Me; refs: Ref }) {
   return <>
     <h1>Approvals <small>exceptions only — on-tariff bookings approve themselves</small></h1>
     {q.data.approvals.length === 0 ? <Empty>Nothing waiting. On-tariff bookings, parsed OTA reservations and settlements pass straight through, audited.</Empty> : q.data.approvals.map((a: any) => <Card key={a.id} tone="amb" title={<>{a.kind} · {a.summary}</>} sub={<>requested by {a.requested_name ?? "system"} · {fmtDateTime(a.created_at)} · {a.note ? `reason: ${a.note.replace(/_/g, " ")}` : ""}</>}>
-      {a.amount_paise != null && <Row strong label="Amount" value={inr(a.amount_paise)} />}
+      {a.kind === "refund" && a.rf_paid != null && <RefundDetail a={a} />}
+      {a.amount_paise != null && <Row strong label={a.kind === "refund" ? "Refund to pay" : "Amount"} value={inr(a.amount_paise)} />}
       <div className="actions end"><Btn kind="danger" onClick={async () => { const note = await askText("Return to the desk", "Note for the person who asked", { ok: "Return" }); if (note) await decide(a.id, "return", { note }); }}>Return</Btn><Btn kind="primary" onClick={() => decide(a.id, "approve", {})}>Approve</Btn></div></Card>)}
-    {me.actor.role === "owner" && toPay.length > 0 && <Card title="Refunds approved · make the bank transfer and record it"><BankPick accounts={refs.accounts} value={refundBank} onChange={setRefundBank} label="Refund paid from" />{toPay.map((a: any) => <div className="row" key={a.id}><div><div>{a.summary}</div><div className="sub">approved {fmtDateTime(a.decided_at)}</div></div><div className="actions"><b className="num">{inr(a.amount_paise)}</b><Btn small kind="primary" onClick={async () => { const r = await askText("Record the refund transfer", "NEFT/UPI reference", { ok: "Record" }); if (r) await run(async () => { const res = await post(`/approvals/refunds/${a.id}/pay`, { reference: r, account_id: refundBank || undefined }); if (res.invoice_to_credit) { await post(`/invoices/${res.invoice_to_credit.id}/credit-notes`, { reason: "refund on cancellation", total_paise: res.invoice_to_credit.suggested_total_paise, refund_payment_id: res.id }); toast("Refund recorded · credit note issued"); } else toast("Refund recorded"); await refunds.reload(); }); }}>Record transfer</Btn></div></div>)}</Card>}
+    {me.actor.role === "owner" && toPay.length > 0 && <Card title="Refunds approved · make the bank transfer and record it"><BankPick accounts={refs.accounts} value={refundBank} onChange={setRefundBank} label="Refund paid from" />{toPay.map((a: any) => <div className="row" key={a.id}><div><div>{a.summary}</div><div className="sub">approved {fmtDateTime(a.decided_at)}{a.rf_payee ? <> · pay <b>{a.rf_payee}</b> · A/c <b className="num">{a.rf_account}</b> · IFSC <b>{a.rf_ifsc}</b>{a.rf_bank ? ` · ${a.rf_bank}` : ""}</> : " · no bank details on file: get them before paying"}</div></div><div className="actions"><b className="num">{inr(a.amount_paise)}</b><Btn small kind="primary" onClick={async () => { const r = await askText("Record the refund transfer", "NEFT/UPI reference", { ok: "Record" }); if (r) await run(async () => { const res = await post(`/approvals/refunds/${a.id}/pay`, { reference: r, account_id: refundBank || undefined }); if (res.invoice_to_credit) { await post(`/invoices/${res.invoice_to_credit.id}/credit-notes`, { reason: "refund on cancellation", total_paise: res.invoice_to_credit.suggested_total_paise, refund_payment_id: res.id }); toast("Refund recorded · credit note issued"); } else toast("Refund recorded"); await refunds.reload(); }); }}>Record transfer</Btn></div></div>)}</Card>}
     <Card title="Recent decisions · audit trail">{q.data.recent.length === 0 ? <Empty>None yet.</Empty> : q.data.recent.map((a: any) => <div className="row" key={a.id}><div><div>{a.summary}</div><div className="sub">{a.decided_name} · {fmtDateTime(a.decided_at)}{a.note ? ` · ${a.note}` : ""}</div></div><Status s={a.status} /></div>)}</Card>
   </>;
+}
+
+const RF_REASON: Record<string, string> = { guest_cancelled: "Guest cancelled", date_change: "Date change", overbooking: "Overbooking", hotel_cancelled: "Cancelled by the hotel", no_show: "No-show", other: "Other" };
+
+/** What the revenue desk needs to approve a refund: why, what was received after charges, the policy, and where it goes. */
+function RefundDetail({ a }: { a: any }) {
+  return <div className="sub" style={{ margin: "6px 0" }}>
+    <Row label="Reason" value={`${RF_REASON[a.rf_reason] ?? a.rf_reason}${a.rf_note ? `: ${a.rf_note}` : ""}${a.rf_days != null ? ` · ${a.rf_days} days before arrival` : ""}`} />
+    <Row label="Guest paid" value={inr(a.rf_paid)} />
+    <Row label="Less gateway and card-machine charges" value={`− ${inr(a.rf_charges)}`} />
+    <Row label="Meadows received" value={inr(a.rf_net)} />
+    <Row label="Cancellation policy allows" value={inr(a.rf_policy)} />
+    {a.rf_above && <Row label="Above policy because" value={a.rf_above} />}
+    {a.rf_payee && <Row label="Pay to" value={`${a.rf_payee} · A/c ${a.rf_account} · IFSC ${a.rf_ifsc}${a.rf_bank ? ` · ${a.rf_bank}` : ""}`} />}
+  </div>;
 }
 
 export function Payouts({ me, refs }: { me: Me; refs: Ref }) {

@@ -36,7 +36,7 @@ describe("Audit fixes", () => {
   it("an approved refund stays on the owner's My work until it is paid", async () => {
     const b = await book("Refund Guest", "9500000402", "2027-10-01", "2027-10-02", "loc_r2");
     await ok("sindhu", "POST", "/api/payments", { booking_id: b.booking.id, method: "cash", amount_paise: 100000 });
-    await ok("shaji", "POST", `/api/bookings/${b.booking.id}/cancel`, { reason: "guest cancelled" });
+    await ok("shaji", "POST", `/api/bookings/${b.booking.id}/cancel`, { reason: "guest cancelled", refund: { reason_code: "guest_cancelled", refund_paise: 100000, payee_name: "Refund Guest", account_no: "123456789012", account_no_confirm: "123456789012", ifsc: "HDFC0001234" } });
     const [apr] = await sql("SELECT id FROM approvals WHERE ref_id = ? AND kind = 'refund'", b.booking.id);
     await ok("trupti", "POST", `/api/approvals/${apr.id}/approve`, {});
     expect(await work("shaji")).toContain(`refund:${apr.id}`);
