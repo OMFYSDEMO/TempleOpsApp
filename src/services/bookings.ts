@@ -27,6 +27,17 @@ export interface CreateBookingInput {
   notes?: string | null;
   /** OTA bookings arrive already paid/contracted: they bypass the tariff approval but are still audited. */
   isOta?: boolean;
+  /** No charge (influencer collaboration, owner's guest): every room at ₹0, the reason recorded. Direct stays only. */
+  complimentary?: boolean;
+  compReason?: string | null;
+}
+
+/** A complimentary stay: direct only, a reason of a few words, every room at ₹0 whatever rate was typed. */
+export function compRooms<T extends { nightlyRatePaise: number }>(rooms: T[], comp: boolean, reason: string | null | undefined, collectionType: string): T[] {
+  if (!comp) return rooms;
+  if (collectionType !== "direct") throw new HttpError(400, "only a direct stay can be complimentary");
+  if ((reason ?? "").trim().length < 3) throw new HttpError(400, "say why the stay is complimentary (e.g. influencer collaboration)");
+  return rooms.map((r) => ({ ...r, nightlyRatePaise: 0 }));
 }
 
 export function gstPolicy(p: PropertyRow): GstPolicy {
@@ -137,6 +148,9 @@ export async function createBooking(db: D1Database, actor: Actor | null, propert
   const taken = await conflicts(db, property.id, roomIds, input.checkIn, input.checkOut, { ignoreLeadId: input.leadId });
   if (taken.length) throw new HttpError(409, "room not available", { nights: taken.map((t) => ({ room_id: t.room_id, night: t.night, kind: t.kind })) });
 
+  const comp = !!input.complimentary;
+  input.rooms = compRooms(input.rooms, comp, input.compReason, channel.collection_type);
+  const compReason = comp ? (input.compReason ?? "").trim() : null;
   const { lines, roomTotal, gst, worst, stayNights } = await priceStay(db, property, input.rooms, input.checkIn, input.checkOut);
 
   const isOta = input.isOta ?? channel.collection_type !== "direct";
@@ -150,11 +164,11 @@ export async function createBooking(db: D1Database, actor: Actor | null, propert
   const status = auto ? "approved" : "provisional";
   b.add(
     `INSERT INTO bookings (id, property_id, guest_id, channel_id, external_ref, status, check_in, check_out, nights, adults, children,
-       room_total_paise, gst_paise, gross_paise, rate_vs_tariff, approval_mode, approved_by, approved_at, salesperson_id, lead_id, inbox_item_id, books_date, notes, created_by)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       room_total_paise, gst_paise, gross_paise, rate_vs_tariff, approval_mode, approved_by, approved_at, salesperson_id, lead_id, inbox_item_id, books_date, notes, created_by, complimentary, comp_reason)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     bid, property.id, guestId, channel.id, input.externalRef ?? null, status, input.checkIn, input.checkOut, nights, input.adults ?? 2, input.children ?? 0,
     roomTotal, gst, roomTotal + gst, worst, auto ? "auto_on_tariff" : "manual", auto ? (actor?.id ?? null) : null, auto ? now : null,
-    input.salespersonId ?? actor?.id ?? null, input.leadId ?? null, input.inboxItemId ?? null, input.checkOut, input.notes ?? null, actor?.id ?? null,
+    input.salespersonId ?? actor?.id ?? null, input.leadId ?? null, input.inboxItemId ?? null, input.checkOut, input.notes ?? null, actor?.id ?? null, comp ? 1 : 0, compReason,
   );
   for (const l of lines) {
     b.add("INSERT INTO booking_rooms (id, booking_id, room_id, nightly_rate_paise, tariff_rate_paise, gst_rate_bp, nights, room_total_paise, gst_paise) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -167,7 +181,7 @@ export async function createBooking(db: D1Database, actor: Actor | null, propert
     b.add("INSERT INTO room_nights (property_id, room_id, night, kind, booking_id) VALUES (?,?,?,'booked',?)", property.id, r.roomId, night, bid);
   }
   const apId = id("apr");
-  const summary = `${input.guest.name} · ${channel.name} · ${input.checkIn}→${input.checkOut} · ${input.rooms.length} room(s)`;
+  const summary = `${input.guest.name} · ${channel.name} · ${input.checkIn}→${input.checkOut} · ${input.rooms.length} room(s)${comp ? ` · complimentary: ${compReason}` : ""}`;
   b.add("INSERT INTO approvals (id, property_id, kind, ref_id, summary, amount_paise, status, requested_by, decided_by, decided_at, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
     apId, property.id, "booking", bid, summary, roomTotal + gst, auto ? "auto" : "pending", actor?.id ?? null, auto ? (actor?.id ?? null) : null, auto ? now : null,
     auto ? (isOta ? "ota_parsed" : "on tariff") : decision.reasons.join(","));
@@ -185,7 +199,7 @@ export interface BookingRow {
   id: string; property_id: string; guest_id: string; channel_id: string; external_ref: string | null; status: string;
   check_in: string; check_out: string; nights: number; adults: number; children: number;
   room_total_paise: number; gst_paise: number; gross_paise: number; rate_vs_tariff: string; approval_mode: string | null;
-  approved_by: string | null; approved_at: string | null; salesperson_id: string | null; lead_id: string | null; inbox_item_id: string | null;
+  approved_by: string | null; approved_at: string | null; salesperson_id: string | null; lead_id: string | null; inbox_item_id: string | null; complimentary: number; comp_reason: string | null;
   books_date: string; checked_in_at: string | null; checked_out_at: string | null; cancelled_at: string | null; cancel_reason: string | null;
   notes: string | null; created_by: string | null; created_at: string; updated_at: string;
 }
@@ -232,6 +246,8 @@ export interface AmendBookingInput {
   guestName?: string | null; guestPhone?: string | null;
   adults?: number; children?: number;
   channelCode?: string; externalRef?: string | null;
+  /** Make the stay complimentary (true), chargeable again (false), or leave it as it is (undefined). */
+  complimentary?: boolean; compReason?: string | null;
   remark: string;
 }
 
@@ -268,7 +284,10 @@ export async function amendBooking(db: D1Database, actor: Actor, property: Prope
     const names = Object.fromEntries(rooms.map((r) => [r.id, r.name]));
     throw new HttpError(409, `${[...new Set(taken.map((t) => names[t.room_id]))].join(", ")} not free on ${[...new Set(taken.map((t) => t.night))].join(", ")}`, { nights: taken.map((t) => ({ room_id: t.room_id, night: t.night, kind: t.kind })) });
   }
-  const { lines, roomTotal, gst, worst, stayNights } = await priceStay(db, property, roomsIn, checkIn, checkOut);
+  const comp = input.complimentary ?? bk.complimentary === 1;
+  const compReason = comp ? ((input.compReason ?? bk.comp_reason ?? "").trim() || null) : null;
+  const pricedRooms = compRooms(roomsIn, comp, compReason, channel.collection_type);
+  const { lines, roomTotal, gst, worst, stayNights } = await priceStay(db, property, pricedRooms, checkIn, checkOut);
   const gross = roomTotal + gst;
   if (gross !== bk.gross_paise) {
     const inv = await one(db, "SELECT id, number FROM invoices WHERE booking_id = ? AND status = 'issued'", bk.id);
@@ -279,7 +298,7 @@ export async function amendBooking(db: D1Database, actor: Actor, property: Prope
   const approverAmends = actor.role === "revenue" || actor.role === "owner";
   const needsApproval = bk.status !== "checked_in" && decision.mode !== "auto_on_tariff" && !approverAmends;
   const status = needsApproval ? "provisional" : bk.status === "provisional" && approverAmends ? "approved" : bk.status;
-  const before = { check_in: bk.check_in, check_out: bk.check_out, rooms: currentRooms, adults: bk.adults, children: bk.children, channel_id: bk.channel_id, external_ref: bk.external_ref, gross_paise: bk.gross_paise, status: bk.status };
+  const before = { check_in: bk.check_in, check_out: bk.check_out, rooms: currentRooms, complimentary: bk.complimentary === 1, adults: bk.adults, children: bk.children, channel_id: bk.channel_id, external_ref: bk.external_ref, gross_paise: bk.gross_paise, status: bk.status };
   const b = new Batch(db, actor);
   const now = nowIso();
   const guest = await one<{ id: string; name: string; phone: string | null }>(db, "SELECT id, name, phone FROM guests WHERE id = ?", bk.guest_id);
@@ -289,9 +308,9 @@ export async function amendBooking(db: D1Database, actor: Actor, property: Prope
     b.add("UPDATE guests SET name = ?, phone = ? WHERE id = ?", name, phone, bk.guest_id);
   }
   b.add(`UPDATE bookings SET check_in = ?, check_out = ?, nights = ?, adults = ?, children = ?, channel_id = ?, external_ref = ?, room_total_paise = ?, gst_paise = ?, gross_paise = ?, rate_vs_tariff = ?, status = ?, books_date = ?,
-         notes = COALESCE(notes || char(10), '') || ?, updated_at = ? WHERE id = ?`,
+         notes = COALESCE(notes || char(10), '') || ?, updated_at = ?, complimentary = ?, comp_reason = ? WHERE id = ?`,
     checkIn, checkOut, nightsBetween(checkIn, checkOut), input.adults ?? bk.adults, input.children ?? bk.children, channel.id, input.externalRef === undefined ? bk.external_ref : input.externalRef,
-    roomTotal, gst, gross, worst, status, checkOut, `Amended ${now.slice(0, 10)} by ${actor.name}: ${remark}`, now, bk.id);
+    roomTotal, gst, gross, worst, status, checkOut, `Amended ${now.slice(0, 10)} by ${actor.name}: ${remark}`, now, comp ? 1 : 0, compReason, bk.id);
   b.add("DELETE FROM booking_rooms WHERE booking_id = ?", bk.id);
   for (const l of lines) b.add("INSERT INTO booking_rooms (id, booking_id, room_id, nightly_rate_paise, tariff_rate_paise, gst_rate_bp, nights, room_total_paise, gst_paise) VALUES (?,?,?,?,?,?,?,?,?)",
     id("brm"), bk.id, l.roomId, l.nightlyRatePaise, l.tariffRatePaise, l.gstRateBp, l.nights, l.roomTotalPaise, l.gstPaise);
@@ -306,7 +325,7 @@ export async function amendBooking(db: D1Database, actor: Actor, property: Prope
     b.add("UPDATE approvals SET status = 'approved', decided_by = ?, decided_at = ?, note = ? WHERE ref_id = ? AND status = 'pending'", actor.id, now, `approved by amendment: ${remark}`, bk.id);
     b.add("UPDATE bookings SET approval_mode = 'manual', approved_by = ?, approved_at = ? WHERE id = ?", actor.id, now, bk.id);
   }
-  const after = { check_in: checkIn, check_out: checkOut, rooms: roomsIn.map((r) => ({ room_id: r.roomId, name: rooms.find((x) => x.id === r.roomId)?.name, nightly_rate_paise: r.nightlyRatePaise })), adults: input.adults ?? bk.adults, children: input.children ?? bk.children, channel_id: channel.id, external_ref: input.externalRef === undefined ? bk.external_ref : input.externalRef, gross_paise: gross, status, remark };
+  const after = { check_in: checkIn, check_out: checkOut, rooms: pricedRooms.map((r) => ({ room_id: r.roomId, name: rooms.find((x) => x.id === r.roomId)?.name, nightly_rate_paise: r.nightlyRatePaise })), complimentary: comp, comp_reason: compReason, adults: input.adults ?? bk.adults, children: input.children ?? bk.children, channel_id: channel.id, external_ref: input.externalRef === undefined ? bk.external_ref : input.externalRef, gross_paise: gross, status, remark };
   b.audit("booking.amend", "booking", bk.id, before, after);
   await notifyRole(b, property.id, "property", "booking_amended", `${guest?.name ?? "Guest"} ${checkIn}→${checkOut}: ${roomsIn.map((r) => rooms.find((x) => x.id === r.roomId)?.name).join(" + ")} · ${remark}`, { kind: "booking", id: bk.id });
   await b.run();

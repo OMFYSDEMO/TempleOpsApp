@@ -134,7 +134,15 @@ function useHolders(checkIn: string, checkOut: string, ignoreBookingId?: string 
  * Room picker: one tile per room showing its state for the chosen dates. Tap a free room to add it at tariff,
  * change the rate in place, tap again to remove. Taken rooms say who has them and cannot be picked.
  */
-function RoomPicker({ me, rooms, checkIn, checkOut, sel, onChange, tariffFor, holders, loading }: { me: Me; rooms: Ref["locations"]; checkIn: string; checkOut: string; sel: Record<string, string>; onChange: (s: Record<string, string>) => void; tariffFor: (roomId: string, night: string) => number | null; holders: Record<string, { name: string; kind: string }>; loading: boolean }) {
+/** No charge for the stay (influencer collaboration, owner's guest): the room rates go, a reason is required. */
+function CompPick({ on, reason, onChange }: { on: boolean; reason: string; onChange: (on: boolean, reason: string) => void }) {
+  return <div className="comppick" style={{ margin: "4px 0 10px" }}>
+    <label className="nowrap"><input type="checkbox" checked={on} onChange={(e: any) => onChange(e.currentTarget.checked, reason)} /> <b>Complimentary stay</b> (no charge)</label>
+    {on && <Field label="Reason (required)" hint="who and why: the revenue desk sees it when approving"><input value={reason} onChange={(e: any) => onChange(true, e.currentTarget.value)} placeholder="e.g. Influencer collaboration" /></Field>}
+  </div>;
+}
+
+function RoomPicker({ me, rooms, checkIn, checkOut, sel, onChange, tariffFor, holders, loading, comp }: { comp?: boolean; me: Me; rooms: Ref["locations"]; checkIn: string; checkOut: string; sel: Record<string, string>; onChange: (s: Record<string, string>) => void; tariffFor: (roomId: string, night: string) => number | null; holders: Record<string, { name: string; kind: string }>; loading: boolean }) {
   const n = nightsOf(checkIn, checkOut);
   if (n === 0) return <div className="roomgrid">{rooms.map((r) => <div key={r.id} className="roomtile idle"><b>{r.name}</b><span className="sub">{r.code} · pick dates to see availability</span></div>)}</div>;
   return <div className="roomgrid">{rooms.map((r) => {
@@ -147,7 +155,8 @@ function RoomPicker({ me, rooms, checkIn, checkOut, sel, onChange, tariffFor, ho
         <span><b>{r.name}</b><span className="sub">{r.code}{t ? ` · tariff ${inr(t)}/night` : " · no tariff set"}</span></span>
         <span className="state">{loading ? "…" : on ? "✓ in this booking" : held ? `${held.kind === "hold" ? "held" : "taken"} · ${held.name}` : "free"}</span>
       </button>
-      {on && <div className="tilebody">
+      {on && comp && <div className="tilebody"><div className="sub">Complimentary · no charge for {n} night{n > 1 ? "s" : ""}</div><div className="actions"><Btn small onClick={toggle}>Remove</Btn></div></div>}
+      {on && !comp && <div className="tilebody">
         <label className="field"><span>Rate per night, ex-GST (₹)</span><input inputMode="decimal" value={sel[r.id]} onChange={(e: any) => onChange({ ...sel, [r.id]: e.currentTarget.value })} /></label>
         <div className="sub">{n} night{n > 1 ? "s" : ""} × {inr(rate)} = <b>{inr(rate * n)}</b>{me.property.gstin ? ` · GST ${slab / 100}%` : ""}{t && rate < t ? " · below tariff" : t && rate > t ? " · above tariff" : ""}</div>
         <div className="actions">{t && rate !== t && <Btn small onClick={() => onChange({ ...sel, [r.id]: String(t / 100) })}>Use tariff</Btn>}<Btn small onClick={toggle}>Remove</Btn></div>
@@ -155,6 +164,9 @@ function RoomPicker({ me, rooms, checkIn, checkOut, sel, onChange, tariffFor, ho
     </div>;
   })}</div>;
 }
+
+/** A complimentary stay charges nothing: every chosen room at ₹0. */
+const zeroed = (sel: Record<string, string>) => Object.fromEntries(Object.keys(sel).filter((k) => sel[k] !== "").map((k) => [k, "0"]));
 
 /** The money a stay adds up to, computed the way the server will. */
 function stayTotals(me: Me, sel: Record<string, string>, checkIn: string, checkOut: string, tariffFor: (roomId: string, night: string) => number | null) {
@@ -192,7 +204,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   const today = me.property.today;
   const prefill = (() => { try { const s = sessionStorage.getItem("avos.bookFromInbox"); return s ? JSON.parse(s) : null; } catch { return null; } })();
   const [fromInbox, setFromInbox] = useState<any>(prefill);
-  const blank = { guest_name: "", guest_phone: "", guest_email: "", notes: "", external_ref: "", rooms: {} as Record<string, string> };
+  const blank = { guest_name: "", guest_phone: "", guest_email: "", notes: "", external_ref: "", rooms: {} as Record<string, string>, complimentary: false, comp_reason: "" };
   const [f, setF] = useState<any>({ guest_name: prefill?.guest_name ?? "", guest_phone: prefill?.guest_phone ?? "", guest_email: prefill?.guest_email ?? "", notes: prefill?.notes ?? "", check_in: prefill?.check_in || today, check_out: prefill?.check_out || addDays(prefill?.check_in || today, 1), adults: prefill?.adults ?? 2, children: prefill?.children ?? 0, channel_code: prefill?.channel_code ?? "direct", external_ref: prefill?.external_ref ?? "", rooms: {} as Record<string, string> });
   // The new-booking panel keeps its draft when closed; an inbox hand-off opens it straight away.
   const [newOpen, setNewOpen] = useState<boolean>(!!prefill);
@@ -204,10 +216,10 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   const detail = useLoad(() => open ? get(`/bookings/${open}`) : Promise.resolve(null), [open]);
   const tariffFor = (roomId: string, night: string) => { let best: any = null; for (const c of refs.rate_cards) { if (c.room_id !== roomId) continue; if (c.from_date && night < c.from_date) continue; if (c.to_date && night > c.to_date) continue; if (!best || c.priority > best.priority) best = c; } return best?.rate_paise ?? null; };
   const av = useHolders(f.check_in, f.check_out);
-  const totals = stayTotals(me, f.rooms, f.check_in, f.check_out, tariffFor);
+  const totals = stayTotals(me, f.complimentary ? zeroed(f.rooms) : f.rooms, f.check_in, f.check_out, tariffFor);
   const channel = refs.channels.find((c) => c.code === f.channel_code);
   const isOta = !!channel && channel.collection_type !== "direct";
-  const missing = totals.nights <= 0 ? "Check-out must be after check-in" : totals.rooms === 0 ? "Pick at least one room" : f.guest_name.trim().length < 2 ? "Add the guest's name" : null;
+  const missing = totals.nights <= 0 ? "Check-out must be after check-in" : totals.rooms === 0 ? "Pick at least one room" : f.guest_name.trim().length < 2 ? "Add the guest's name" : f.complimentary && String(f.comp_reason ?? "").trim().length < 3 ? "Say why the stay is complimentary" : null;
   const canSave = !missing && Object.values(f.rooms as Record<string, string>).every((v) => v === "" || Number(v) >= 0);
   // The same guest (by phone) already booked for overlapping dates: almost always one stay that needs a second room,
   // which belongs on the existing booking (one bill, one payment), not a new one.
@@ -218,8 +230,9 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
     await saveBooking();
   };
   const saveBooking = () => run(async () => {
-    const rs = Object.entries(f.rooms as Record<string, string>).filter(([, v]) => v !== "").map(([room_id, v]) => ({ room_id, nightly_rate_paise: Math.round(Number(v) * 100) }));
-    const r = await post("/bookings", { ...f, rooms: rs, inbox_item_id: fromInbox?.inbox_item_id ?? undefined });
+    const comp = !!f.complimentary && !isOta;
+    const rs = Object.entries(f.rooms as Record<string, string>).filter(([, v]) => v !== "").map(([room_id, v]) => ({ room_id, nightly_rate_paise: comp ? 0 : Math.round(Number(v) * 100) }));
+    const r = await post("/bookings", { ...f, complimentary: comp, comp_reason: comp ? f.comp_reason : undefined, rooms: rs, inbox_item_id: fromInbox?.inbox_item_id ?? undefined });
     if (fromInbox) { try { sessionStorage.removeItem("avos.bookFromInbox"); } catch {} setFromInbox(null); }
     toast(r.booking.status === "approved" ? `Booked · ${inr(r.booking.grossPaise)} gross · approved` : `Booked · awaiting approval (${r.booking.approval.reasons.join(", ")})`);
     setF({ ...f, ...blank }); setNewOpen(false); await q.reload(); setOpen(r.booking.id);
@@ -251,7 +264,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
         <td><span className="roomchips">{String(b.room_names ?? "").split(", ").filter(Boolean).map((n: string, i: number) => <i key={n + i}>{n}</i>)}</span></td>
         <td>{CHANNEL_SHORT[b.channel_code] ?? b.channel_name}</td>
         <td className="num">{b.gross_paise - b.paid_paise > 0 ? <b style={{ color: "var(--amb)" }}>{inr(b.gross_paise - b.paid_paise)}</b> : <span className="muted">paid</span>}<small>of {inr(b.gross_paise)}</small></td>
-        <td><div className="pills"><Status s={b.status} />{b.rate_vs_tariff === "below" && <Status s="below" />}</div></td>
+        <td><div className="pills"><Status s={b.status} />{b.complimentary === 1 && <span className="status" title={b.comp_reason ?? ""}>Complimentary{b.comp_reason ? ` · ${b.comp_reason}` : ""}</span>}{b.rate_vs_tariff === "below" && <Status s="below" />}</div></td>
       </tr>)}</tbody></table></ScrollX>}
     </Card>
 
@@ -270,7 +283,8 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
         <ChannelPick channels={refs.channels} value={f.channel_code} onChange={(v) => setF({ ...f, channel_code: v })} />
       </div>
       <div className="section"><div className="sectionhead"><b>2 · Rooms</b><span className="sub">{totals.nights > 0 ? "tap a free room to add it at tariff; change the rate on the tile" : "set the dates first"}</span></div>
-        <RoomPicker me={me} rooms={rooms} checkIn={f.check_in} checkOut={f.check_out} sel={f.rooms} onChange={(rs) => setF({ ...f, rooms: rs })} tariffFor={tariffFor} holders={av.holders} loading={av.loading} />
+        {!isOta && <CompPick on={!!f.complimentary} reason={f.comp_reason ?? ""} onChange={(on, reason) => setF({ ...f, complimentary: on, comp_reason: reason })} />}
+        <RoomPicker me={me} rooms={rooms} checkIn={f.check_in} checkOut={f.check_out} sel={f.rooms} onChange={(rs) => setF({ ...f, rooms: rs })} tariffFor={tariffFor} holders={av.holders} loading={av.loading} comp={!!f.complimentary && !isOta} />
         <SummaryBar t={totals} me={me} isOta={isOta} />
       </div>
       <div className="section"><div className="sectionhead"><b>3 · Guest</b><span className="sub">name and phone are enough; the rest can follow</span></div>
@@ -370,13 +384,15 @@ function RecordPayment({ me, refs, d, onDone }: { me: Me; refs: Ref; d: any; onD
 function Amend({ me, d, rooms, refs, tariffFor, onDone }: { me: Me; d: any; rooms: Ref["locations"]; refs: Ref; tariffFor: (roomId: string, night: string) => number | null; onDone: () => Promise<void> }) {
   const cur: Record<string, string> = {}; for (const r of d.rooms) cur[r.room_id] = String(r.nightly_rate_paise / 100);
   const [openA, setOpenA] = useState(false);
-  const [a, setA] = useState<any>({ guest_name: d.guest.name, guest_phone: d.guest.phone ?? "", check_in: d.booking.check_in, check_out: d.booking.check_out, adults: d.booking.adults, children: d.booking.children, channel_code: d.channel.code, external_ref: d.booking.external_ref ?? "", rooms: cur, remark: "" });
+  const [a, setA] = useState<any>({ complimentary: d.booking.complimentary === 1, comp_reason: d.booking.comp_reason ?? "", guest_name: d.guest.name, guest_phone: d.guest.phone ?? "", check_in: d.booking.check_in, check_out: d.booking.check_out, adults: d.booking.adults, children: d.booking.children, channel_code: d.channel.code, external_ref: d.booking.external_ref ?? "", rooms: cur, remark: "" });
   const av = useHolders(a.check_in, a.check_out, d.booking.id);
-  const totals = stayTotals(me, a.rooms, a.check_in, a.check_out, tariffFor);
   const channel = refs.channels.find((c) => c.code === a.channel_code);
-  const changed = a.guest_name !== d.guest.name || a.guest_phone !== (d.guest.phone ?? "") || a.check_in !== d.booking.check_in || a.check_out !== d.booking.check_out || a.adults !== d.booking.adults || a.children !== d.booking.children || a.channel_code !== d.channel.code || a.external_ref.trim() !== (d.booking.external_ref ?? "") || JSON.stringify(a.rooms) !== JSON.stringify(cur);
+  const isDirect = !channel || channel.collection_type === "direct";
+  const comp = !!a.complimentary && isDirect;
+  const totals = stayTotals(me, comp ? zeroed(a.rooms) : a.rooms, a.check_in, a.check_out, tariffFor);
+  const changed = a.guest_name !== d.guest.name || a.guest_phone !== (d.guest.phone ?? "") || a.check_in !== d.booking.check_in || a.check_out !== d.booking.check_out || a.adults !== d.booking.adults || a.children !== d.booking.children || a.channel_code !== d.channel.code || a.external_ref.trim() !== (d.booking.external_ref ?? "") || JSON.stringify(a.rooms) !== JSON.stringify(cur) || comp !== (d.booking.complimentary === 1) || (comp && a.comp_reason.trim() !== (d.booking.comp_reason ?? ""));
   const save = () => run(async () => {
-    const r = await post(`/bookings/${d.booking.id}/amend`, { ...a, rooms: Object.entries(a.rooms as Record<string, string>).filter(([, v]) => v !== "").map(([room_id, v]) => ({ room_id, nightly_rate_paise: Math.round(Number(v) * 100) })) });
+    const r = await post(`/bookings/${d.booking.id}/amend`, { ...a, complimentary: comp, comp_reason: comp ? a.comp_reason : null, rooms: Object.entries(a.rooms as Record<string, string>).filter(([, v]) => v !== "").map(([room_id, v]) => ({ room_id, nightly_rate_paise: comp ? 0 : Math.round(Number(v) * 100) })) });
     toast(r.booking.needsApproval ? `Amended · awaiting approval (${r.booking.approval.reasons.join(", ")})` : "Amended · audited · front desk notified");
     setOpenA(false); await onDone();
   });
@@ -389,7 +405,8 @@ function Amend({ me, d, rooms, refs, tariffFor, onDone }: { me: Me; d: any; room
       <Field label="Adults"><input type="number" min="1" value={a.adults} onChange={(e: any) => setA({ ...a, adults: Number(e.currentTarget.value) })} /></Field>
       <Field label="Children"><input type="number" min="0" value={a.children} onChange={(e: any) => setA({ ...a, children: Number(e.currentTarget.value) })} /></Field>
     </div>
-    <RoomPicker me={me} rooms={rooms} checkIn={a.check_in} checkOut={a.check_out} sel={a.rooms} onChange={(rs) => setA({ ...a, rooms: rs })} tariffFor={tariffFor} holders={av.holders} loading={av.loading} />
+    {isDirect && <CompPick on={comp} reason={a.comp_reason} onChange={(on, reason) => setA({ ...a, complimentary: on, comp_reason: reason })} />}
+    <RoomPicker me={me} rooms={rooms} checkIn={a.check_in} checkOut={a.check_out} sel={a.rooms} onChange={(rs) => setA({ ...a, rooms: rs })} tariffFor={tariffFor} holders={av.holders} loading={av.loading} comp={comp} />
     <SummaryBar t={totals} me={me} isOta={!!channel && channel.collection_type !== "direct"} label="After the change" />
     <div className="sub" style={{ margin: "12px 0 6px" }}>Channel</div>
     <ChannelPick channels={refs.channels} value={a.channel_code} onChange={(v) => setA({ ...a, channel_code: v })} />
@@ -399,7 +416,7 @@ function Amend({ me, d, rooms, refs, tariffFor, onDone }: { me: Me; d: any; room
       <Field label="Booking reference" hint="the reservation number on the email"><input value={a.external_ref} onChange={(e: any) => setA({ ...a, external_ref: e.currentTarget.value })} placeholder="e.g. 1060900000106018" /></Field>
       <Field label="Remark (required)" hint="what was wrong and what changed"><input value={a.remark} onChange={(e: any) => setA({ ...a, remark: e.currentTarget.value })} placeholder="e.g. Cleartrip mapped the room type wrongly; moved to Superior" /></Field>
     </div>
-    <div className="actions end"><Btn onClick={() => setOpenA(false)}>Discard</Btn><Btn kind="primary" disabled={!changed || a.remark.trim().length < 3 || totals.rooms === 0} onClick={save}>Save amendment</Btn></div>
+    <div className="actions end"><Btn onClick={() => setOpenA(false)}>Discard</Btn><Btn kind="primary" disabled={!changed || a.remark.trim().length < 3 || (comp && a.comp_reason.trim().length < 3) || totals.rooms === 0} onClick={save}>Save amendment</Btn></div>
   </div>;
 }
 

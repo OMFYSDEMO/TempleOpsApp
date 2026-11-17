@@ -74,6 +74,7 @@ r.post("/", requireCap("bookings_write"), async (c) => {
     adults: int(x.adults ?? 2, "adults", { min: 1 }), children: int(x.children ?? 0, "children", { min: 0, optional: true }),
     rooms: rooms.map((rm) => ({ roomId: str(rm.room_id, "rooms[].room_id"), nightlyRatePaise: int(rm.nightly_rate_paise, "rooms[].nightly_rate_paise", { min: 0 }) })),
     notes: optStr(x.notes, "notes"), isOta: (optStr(x.channel_code, "channel_code") ?? "direct") !== "direct", inboxItemId: optStr(x.inbox_item_id, "inbox_item_id"),
+    complimentary: x.complimentary === true, compReason: optStr(x.comp_reason, "comp_reason"),
   });
   const inboxId = optStr(x.inbox_item_id, "inbox_item_id");
   if (inboxId) {
@@ -118,6 +119,7 @@ r.post("/:id/amend", requireCap("bookings_write"), async (c) => {
     guestName: x.guest_name === undefined ? undefined : optStr(x.guest_name, "guest_name"), guestPhone: x.guest_phone === undefined ? undefined : optStr(x.guest_phone, "guest_phone"),
     adults: x.adults === undefined ? undefined : int(x.adults, "adults", { min: 1 }), children: x.children === undefined ? undefined : int(x.children, "children", { min: 0 }),
     channelCode: optStr(x.channel_code, "channel_code") ?? undefined, externalRef: x.external_ref === undefined ? undefined : optStr(x.external_ref, "external_ref"),
+    complimentary: typeof x.complimentary === "boolean" ? x.complimentary : undefined, compReason: x.comp_reason === undefined ? undefined : optStr(x.comp_reason, "comp_reason"),
     remark: str(x.remark, "remark"),
   });
   return c.json({ booking: res });
@@ -267,12 +269,14 @@ ${provisional ? '<div class="warn">This booking is provisional and awaits confir
 <div class="stay"><div><span class="muted">Check-in</span><b>${esc(day(bk.check_in))}</b><span class="muted">from 2:00 pm</span></div><div><span class="muted">Check-out</span><b>${esc(day(bk.check_out))}</b><span class="muted">by 11:00 am</span></div><div><span class="muted">Guests</span><b>${bk.adults} adult${bk.adults === 1 ? "" : "s"}${bk.children ? ` · ${bk.children} child${bk.children === 1 ? "" : "ren"}` : ""}</b><span class="muted">${bk.nights} night${bk.nights === 1 ? "" : "s"}</span></div></div>
 <table><thead><tr><th>Room</th><th class="n">Nights</th><th class="n">Rate / night</th><th class="n">Amount</th></tr></thead><tbody>
 ${rooms.map((rm) => `<tr><td>${esc(rm.room_name)}</td><td class="n">${rm.nights}</td><td class="n">${formatINR(rm.nightly_rate_paise)}</td><td class="n">${formatINR(rm.room_total_paise)}</td></tr>`).join("")}
-<tr><td>GST</td><td></td><td></td><td class="n">${formatINR(bk.gst_paise)}</td></tr>
+${bk.complimentary ? `<tr class="tot"><td colspan="3">Complimentary stay</td><td class="n">No charge</td></tr></tbody></table>
+<p class="muted">Please carry a government photo ID for every guest (passport and visa for foreign nationals).</p>
+<p class="muted">We look forward to welcoming you.</p></body></html>` : `<tr><td>GST</td><td></td><td></td><td class="n">${formatINR(bk.gst_paise)}</td></tr>
 <tr class="tot"><td>Total</td><td></td><td></td><td class="n">${formatINR(bk.gross_paise)}</td></tr>
 <tr><td>Paid</td><td></td><td></td><td class="n">${formatINR(paid)}</td></tr>
 <tr class="tot"><td>${balance > 0 ? "Balance payable at the property" : "Balance"}</td><td></td><td></td><td class="n">${formatINR(balance)}</td></tr></tbody></table>
 <p class="muted">Please carry a government photo ID for every guest (passport and visa for foreign nationals). This is a booking confirmation, not a tax invoice; the invoice is issued at check-out.</p>
-<p class="muted">We look forward to welcoming you.</p></body></html>`;
+<p class="muted">We look forward to welcoming you.</p></body></html>`}`;
   return c.html(html);
 });
 
