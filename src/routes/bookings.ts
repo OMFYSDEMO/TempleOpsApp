@@ -4,6 +4,7 @@ import { nowIso, todayIn } from "../domain/dates";
 import { createBooking, cancelBooking, loadBooking, paidOnBooking , amendBooking } from "../services/bookings";
 import { allowed } from "../auth";
 import { formatINR } from "../domain/money";
+import { openCloseouts } from "../services/staah";
 
 const r = newRouter();
 
@@ -38,6 +39,22 @@ r.get("/", requireCap("bookings_read"), async (c) => {
      FROM bookings b JOIN guests g ON g.id = b.guest_id JOIN channels ch ON ch.id = b.channel_id
      WHERE ${where.join(" AND ")} ORDER BY b.check_in DESC LIMIT 300`, ...params);
   return c.json({ bookings: rows });
+});
+
+/** STAAH updates still owed for bookings made, cancelled or moved by hand in AVOS (see services/staah.ts). */
+r.get("/staah-closeouts", requireCap("bookings_read"), async (c) => c.json({ items: await openCloseouts(c.env.DB, c.get("property").id) }));
+
+/** The desk has made the change in STAAH: the reminder goes. */
+r.post("/staah-closeouts/:cid/done", requireCap("bookings_write"), async (c) => {
+  const p = c.get("property"); const actor = c.get("actor");
+  const row = await one<{ id: string; status: string; action: string; booking_id: string }>(c.env.DB, "SELECT id, status, action, booking_id FROM staah_closeouts WHERE id = ? AND property_id = ?", c.req.param("cid"), p.id);
+  if (!row) throw new HttpError(404, "not found");
+  if (row.status !== "open") return c.json({ ok: true, already: row.status });
+  const b = new Batch(c.env.DB, actor);
+  b.add("UPDATE staah_closeouts SET status = 'done', done_by = ?, done_at = ? WHERE id = ?", actor.id, nowIso(), row.id);
+  b.audit("staah.closeout_done", "booking", row.booking_id, { status: "open" }, { status: "done", action: row.action, closeout_id: row.id });
+  await b.run();
+  return c.json({ ok: true });
 });
 
 r.get("/:id", requireCap("bookings_read"), async (c) => {

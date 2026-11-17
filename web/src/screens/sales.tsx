@@ -213,6 +213,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
   const [filter, setFilter] = useState<"upcoming" | "inhouse" | "past" | "cancelled" | "all">(() => (open ? "all" : "upcoming"));
   const [search, setSearch] = useState("");
   const [onlyMine, setOnlyMine] = useState(false);
+  const staah = useLoad(() => get("/bookings/staah-closeouts"), []);
   const detail = useLoad(() => open ? get(`/bookings/${open}`) : Promise.resolve(null), [open]);
   const tariffFor = (roomId: string, night: string) => { let best: any = null; for (const c of refs.rate_cards) { if (c.room_id !== roomId) continue; if (c.from_date && night < c.from_date) continue; if (c.to_date && night > c.to_date) continue; if (!best || c.priority > best.priority) best = c; } return best?.rate_paise ?? null; };
   const av = useHolders(f.check_in, f.check_out);
@@ -235,7 +236,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
     const r = await post("/bookings", { ...f, complimentary: comp, comp_reason: comp ? f.comp_reason : undefined, rooms: rs, inbox_item_id: fromInbox?.inbox_item_id ?? undefined });
     if (fromInbox) { try { sessionStorage.removeItem("avos.bookFromInbox"); } catch {} setFromInbox(null); }
     toast(r.booking.status === "approved" ? `Booked · ${inr(r.booking.grossPaise)} gross · approved` : `Booked · awaiting approval (${r.booking.approval.reasons.join(", ")})`);
-    setF({ ...f, ...blank }); setNewOpen(false); await q.reload(); setOpen(r.booking.id);
+    setF({ ...f, ...blank }); setNewOpen(false); await Promise.all([q.reload(), staah.reload()]); setOpen(r.booking.id);
   });
   const all: any[] = q.data?.bookings ?? [];
   const isUpcoming = (b: any) => ["provisional", "approved"].includes(b.status) && b.check_out >= today;
@@ -256,6 +257,10 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
       <Btn kind="primary" onClick={() => setNewOpen(true)}>+ New booking</Btn>
     </div>
 
+    {(staah.data?.items?.length ?? 0) > 0 && <Card tone="amb" title="Update STAAH" sub="made, cancelled or moved here by hand: STAAH still shows these nights wrongly on every channel until you change them there">
+      {staah.data.items.map((it: any) => <div className="row" key={it.id}><div><div><b>{it.action === "close" ? "Close out" : "Reopen"}</b> · {it.rooms} · {fmtRange(it.check_in, it.check_out)}</div><div className="sub">{it.guest_name ?? ""}{it.action === "close" ? " · reduce availability (or stop sale) for these nights" : " · open these nights again"}</div></div>
+        {me.capabilities.includes("bookings_write") && <Btn small kind="primary" onClick={() => run(async () => { await post(`/bookings/staah-closeouts/${it.id}/done`); await staah.reload(); }, "Done in STAAH")}>Done in STAAH</Btn>}</div>)}
+    </Card>}
     <Card title={onlyMine ? "My bookings" : "Bookings"} actions={<><label className="nowrap"><input type="checkbox" checked={onlyMine} onChange={(e: any) => setOnlyMine(e.currentTarget.checked)} /> Only mine</label><input className="search" type="search" aria-label="Search bookings" placeholder="Search guest, phone, reference" value={search} onChange={(e: any) => setSearch(e.currentTarget.value)} /></>}>
       <Chips label="Show" value={filter} options={[{ value: "upcoming", label: `Upcoming · ${counts.upcoming}` }, { value: "inhouse", label: `In house · ${counts.inhouse}` }, { value: "past", label: "Past" }, { value: "cancelled", label: "Cancelled" }, { value: "all", label: "All" }]} onChange={setFilter} />
       {!q.data ? <Loading error={q.error} /> : list.length === 0 ? <Empty>{search ? `No booking matches “${search}”.` : filter === "upcoming" ? "No upcoming stays. New bookings appear here." : "Nothing here."}</Empty> : <ScrollX><table className="t bookings"><thead><tr><th>Guest</th><th>Stay</th><th>Rooms</th><th>Channel</th><th className="num">Balance</th><th>Status</th></tr></thead><tbody>{list.map((b: any) => <tr key={b.id} className={open === b.id ? "open" : ""} onClick={() => setOpen(b.id)}>
@@ -300,7 +305,7 @@ export function Reservations({ me, refs }: { me: Me; refs: Ref }) {
     </Drawer>}
 
     {open && <Drawer wide title={detail.data?.guest?.name ?? "Booking"} sub={detail.data ? `${fmtRange(detail.data.booking.check_in, detail.data.booking.check_out)} · ${detail.data.channel.name}` : undefined} onClose={() => setOpen(null)}>
-      {!detail.data ? <Loading error={detail.error} /> : <BookingDetail me={me} refs={refs} d={detail.data} rooms={rooms} tariffFor={tariffFor} onChange={async () => { await Promise.all([q.reload(), detail.reload()]); }} onClose={() => setOpen(null)} />}
+      {!detail.data ? <Loading error={detail.error} /> : <BookingDetail me={me} refs={refs} d={detail.data} rooms={rooms} tariffFor={tariffFor} onChange={async () => { await Promise.all([q.reload(), detail.reload(), staah.reload()]); }} onClose={() => setOpen(null)} />}
     </Drawer>}
   </>;
 }

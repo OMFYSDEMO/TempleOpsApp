@@ -5,6 +5,7 @@ import { computeRoomLine, type GstPolicy } from "../domain/gst";
 import { normalisePhone } from "../domain/ids";
 import { tariffFor, compareToTariff, decideApproval, type RateCardRow, type RateVsTariff } from "../domain/tariff";
 import { notifyRole } from "./notify";
+import { addCloseout, closeoutOnAmend, closeoutOnCancel, handMadeDirect, roomNames } from "./staah";
 
 export interface ChannelRow {
   id: string; code: string; name: string; collection_type: "direct" | "channel_collect" | "hotel_collect";
@@ -191,6 +192,9 @@ export async function createBooking(db: D1Database, actor: Actor | null, propert
     b.audit("lead.won", "lead", input.leadId, null, { booking_id: bid });
   }
   b.audit("booking.create", "booking", bid, null, { status, channel: channel.code, check_in: input.checkIn, check_out: input.checkOut, gross_paise: roomTotal + gst, rate_vs_tariff: worst, approval: decision });
+  // Made by hand in AVOS: STAAH does not know these nights are gone until someone closes them there.
+  if (handMadeDirect({ inbox_item_id: input.inboxItemId ?? null }, channel.collection_type))
+    addCloseout(b, property.id, bid, "close", input.checkIn, input.checkOut, roomNames(input.rooms.map((r) => rooms.find((x) => x.id === r.roomId)?.name)), input.guest.name || null, actor?.id ?? null);
   await b.run();
   return { id: bid, status, approval: decision, roomTotalPaise: roomTotal, gstPaise: gst, grossPaise: roomTotal + gst, rateVsTariff: worst, lines };
 }
@@ -229,6 +233,12 @@ export async function cancelBooking(db: D1Database, actor: Actor, property: Prop
   // A rate or amendment approval still waiting on this booking has nothing left to decide: close it with the reason.
   b.add("UPDATE approvals SET status = 'returned', decided_by = ?, decided_at = ?, note = ? WHERE property_id = ? AND kind = 'booking' AND ref_id = ? AND status = 'pending'", actor.id, now, `booking ${newStatus}: ${reason}`, property.id, bookingId);
   b.audit(`booking.${newStatus}`, "booking", bookingId, { status: bk.status }, { status: newStatus, reason, paid_paise: paid });
+  if (newStatus === "cancelled") {
+    const ch = await one<{ collection_type: string }>(db, "SELECT collection_type FROM channels WHERE id = ?", bk.channel_id);
+    const names = await all<{ name: string }>(db, "SELECT DISTINCT l.name FROM booking_rooms br JOIN locations l ON l.id = br.room_id WHERE br.booking_id = ?", bookingId);
+    const g = await one<{ name: string }>(db, "SELECT name FROM guests WHERE id = ?", bk.guest_id);
+    await closeoutOnCancel(db, b, property.id, bk, ch?.collection_type ?? "", roomNames(names.map((n) => n.name)), g?.name ?? null, actor.id);
+  }
   let refundApprovalId: string | null = null;
   if (paid > 0) {
     refundApprovalId = id("apr");
@@ -316,6 +326,13 @@ export async function amendBooking(db: D1Database, actor: Actor, property: Prope
     id("brm"), bk.id, l.roomId, l.nightlyRatePaise, l.tariffRatePaise, l.gstRateBp, l.nights, l.roomTotalPaise, l.gstPaise);
   b.add("DELETE FROM room_nights WHERE booking_id = ?", bk.id);
   for (const r of roomsIn) for (const night of stayNights) b.add("INSERT INTO room_nights (property_id, room_id, night, kind, booking_id) VALUES (?,?,?,'booked',?)", property.id, r.roomId, night, bk.id);
+  {
+    // Moved by hand in AVOS: STAAH must follow (only stays STAAH never sent us; it changes its own bookings itself).
+    const oldCh = await one<{ collection_type: string }>(db, "SELECT collection_type FROM channels WHERE id = ?", bk.channel_id);
+    const oldNames = await all<{ name: string }>(db, "SELECT DISTINCT l.name FROM booking_rooms br JOIN locations l ON l.id = br.room_id WHERE br.booking_id = ?", bk.id);
+    await closeoutOnAmend(db, b, property.id, bk, oldCh?.collection_type ?? "", roomNames(oldNames.map((n) => n.name)),
+      { checkIn, checkOut, rooms: roomNames(roomsIn.map((r) => rooms.find((x) => x.id === r.roomId)?.name)) }, guest?.name ?? null, actor.id);
+  }
   const summary = `${guest?.name ?? "Guest"} · ${channel.name} · ${checkIn}→${checkOut} · ${roomsIn.length} room(s) · amended: ${remark}`;
   if (needsApproval) {
     b.add("UPDATE approvals SET status = 'returned', note = 'superseded by amendment', decided_at = ? WHERE ref_id = ? AND status = 'pending'", now, bk.id);

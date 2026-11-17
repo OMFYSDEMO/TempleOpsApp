@@ -22,7 +22,7 @@ export const ESCALATE_TO: Record<string, string | null> = { sales: "revenue", pr
 
 /** Hours an item may wait before it is overdue. Start loose; tighten once the slip report shows what is normal. */
 export const TOLERANCE: Record<string, number> = {
-  inbox: 2, lead: 1, receipt: 24, paidonline: 6,
+  inbox: 2, lead: 1, staah: 2, receipt: 24, paidonline: 6,
   arrival: 4, departure: 4, overstay: 1, task: 24, unpaid: 24, refund: 48, gstslab: 24, airpay: 24,
   approval: 4, payout: 7 * 24, bank: 7 * 24,
   lock: 72, file: 72,
@@ -55,6 +55,9 @@ export async function allWorkItems(db: D1Database, p: PropertyRow, now = nowIso(
     out.push(item("inbox", `inbox:${r.id}`, `Bank alert not posted · ${r.subject ?? "bank email"}`, r.auto_note ?? null, "revenue", r.received_at, "#inbox", now));
   for (const r of await all<any>(db, "SELECT l.id, l.created_at, l.check_in, l.source, g.name FROM leads l LEFT JOIN guests g ON g.id = l.guest_id WHERE l.property_id = ? AND l.status = 'new' ORDER BY l.created_at", p.id))
     out.push(item("lead", `lead:${r.id}`, `${r.name ?? "Lead"} · ${r.source} enquiry unanswered`, r.check_in ? `wants ${r.check_in}` : null, "sales", r.created_at, "#leads", now));
+  // Sales: STAAH changes owed for bookings made, cancelled or moved by hand in AVOS, so no channel sells those nights.
+  for (const r of await all<any>(db, "SELECT id, action, check_in, check_out, rooms, guest_name, created_at FROM staah_closeouts WHERE property_id = ? AND status = 'open' ORDER BY created_at", p.id))
+    out.push(item("staah", `staah:${r.id}`, `${r.action === "close" ? "Close out" : "Reopen"} in STAAH · ${r.rooms} · ${r.check_in} → ${r.check_out}${r.guest_name ? ` · ${r.guest_name}` : ""}`, r.action === "close" ? "booked in AVOS by hand: reduce availability in STAAH so no channel sells these nights, then tick Done in STAAH on Reservations" : "cancelled or moved in AVOS: open these nights again in STAAH, then tick Done in STAAH on Reservations", "sales", r.created_at, "#resv", now));
   // Property: today's arrivals and departures, overstays, open tasks, gateway receipts not matched to a stay.
   for (const r of await all<any>(db, "SELECT b.id, b.check_in, g.name FROM bookings b JOIN guests g ON g.id = b.guest_id WHERE b.property_id = ? AND b.status = 'approved' AND b.check_in <= ? ORDER BY b.check_in", p.id, today))
     out.push(item("arrival", `arrival:${r.id}`, `${r.name} arriving ${r.check_in === today ? "today" : r.check_in} · not checked in`, r.check_in < today ? "Front desk → Not checked in yet: set when they arrived (and left), or No-show" : null, "property", localIso(r.check_in, "14:00"), "#desk", now));
