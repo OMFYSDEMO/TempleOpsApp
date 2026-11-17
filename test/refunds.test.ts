@@ -66,3 +66,35 @@ describe("Cancellation refunds", () => {
     expect(n.refundApprovalId).toBeNull();
   });
 });
+
+describe("Refund asked after the booking was cancelled", () => {
+  beforeAll(seed);
+  const bank = { payee_name: "Late Request", account_no: "998877665544", account_no_confirm: "998877665544", ifsc: "SBIN0001234" };
+  const in_ = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+  it("an old refund is returned; the desk asks again with the reason, net received and bank account; one at a time", async () => {
+    const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Overbooked Guest", guest_phone: "9400000801", channel_code: "direct", check_in: in_(17), check_out: in_(18), rooms: [{ room_id: "loc_r2", nightly_rate_paise: 500000 }] });
+    await ok("shaji", "POST", "/api/payments", { booking_id: b.booking.id, method: "airpay", amount_paise: 1155000, reference: "AP-1" });
+    // Cancelled the old way (an email cancellation): a refund to decide, without details.
+    await sql("UPDATE bookings SET status = 'cancelled', cancelled_at = ?, cancel_reason = 'Over Booking' WHERE id = ?", new Date().toISOString(), b.booking.id);
+    await sql("INSERT INTO approvals (id, property_id, kind, ref_id, summary, amount_paise, status) VALUES ('apr_old_rf', 'prop_meadows', 'refund', ?, 'old refund', 1155000, 'approved')", b.booking.id);
+    const blocked = await api("prachi", "POST", `/api/bookings/${b.booking.id}/refund-request`, { refund: { reason_code: "overbooking", refund_paise: 1000000, ...bank } });
+    expect(blocked.status).toBe(409); // the old approved refund is still open
+    await sql("UPDATE approvals SET status = 'returned' WHERE id = 'apr_old_rf'");
+    const q = await ok("prachi", "GET", `/api/bookings/${b.booking.id}/refund-quote?reason=overbooking`);
+    expect(q.charges_paise).toBeGreaterThan(0); // Airpay's charge comes off
+    expect(q.policy_refund_paise).toBe(q.net_received_paise);
+    const r = await ok("prachi", "POST", `/api/bookings/${b.booking.id}/refund-request`, { refund: { reason_code: "overbooking", refund_paise: q.net_received_paise, ...bank } });
+    expect((await sql("SELECT amount_paise, status FROM approvals WHERE id = ?", r.refundApprovalId))[0]).toMatchObject({ amount_paise: q.net_received_paise, status: "pending" });
+    expect((await api("prachi", "POST", `/api/bookings/${b.booking.id}/refund-request`, { refund: { reason_code: "overbooking", refund_paise: 100, ...bank } })).status).toBe(409);
+  });
+
+  it("the 7-day rule counts from the day it was cancelled, not the day the refund is asked", async () => {
+    const b = await ok("prachi", "POST", "/api/bookings", { guest_name: "Early Canceller", guest_phone: "9400000802", channel_code: "direct", check_in: in_(5), check_out: in_(6), rooms: [{ room_id: "loc_r3", nightly_rate_paise: 500000 }] });
+    await ok("shaji", "POST", "/api/payments", { booking_id: b.booking.id, method: "upi", amount_paise: 500000, reference: "U-1" });
+    await sql("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE id = ?", new Date(Date.now() - 10 * 86_400_000).toISOString(), b.booking.id);
+    const q = await ok("prachi", "GET", `/api/bookings/${b.booking.id}/refund-quote?reason=guest_cancelled`);
+    expect(q.days_before_arrival).toBeGreaterThanOrEqual(7);
+    expect(q.policy_refund_paise).toBe(500000);
+  });
+});

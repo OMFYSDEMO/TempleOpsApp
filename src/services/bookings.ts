@@ -244,19 +244,7 @@ export async function cancelBooking(db: D1Database, actor: Actor, property: Prop
   const q = await refundQuote(db, property, bookingId, refund?.reason_code ?? (newStatus === "no_show" ? "no_show" : "guest_cancelled"));
   const guestName = (await one<{ name: string }>(db, "SELECT name FROM guests WHERE id = ?", bk.guest_id))?.name ?? "Guest";
   if (refund && q.paid_paise > 0 && !q.ota_collected) {
-    // The desk said why, how much and where to: the request is kept whole; money owed goes to the revenue desk to approve.
-    const payee = checkRefund(refund, q);
-    if (refund.refund_paise > 0) {
-      refundApprovalId = id("apr");
-      b.add("INSERT INTO approvals (id, property_id, kind, ref_id, summary, amount_paise, status, requested_by, note) VALUES (?,?,?,?,?,?,?,?,?)",
-        refundApprovalId, property.id, "refund", bookingId, `Refund ${(refund.refund_paise / 100).toLocaleString("en-IN")} · ${guestName} · ${REASON_LABEL[refund.reason_code]}${refund.reason_note ? `: ${refund.reason_note}` : ""}`, refund.refund_paise, "pending", actor.id,
-        refund.refund_paise > q.policy_refund_paise ? `above policy: ${refund.above_policy_reason}` : q.rule);
-      await notifyRole(b, property.id, "revenue", "approval_pending", `Refund of ${refund.refund_paise / 100} awaiting approval: ${guestName} (${REASON_LABEL[refund.reason_code]})`, { kind: "booking", id: bookingId });
-    }
-    b.add(`INSERT INTO refund_requests (id, property_id, booking_id, approval_id, reason_code, reason_note, days_before_arrival, paid_paise, charges_paise, net_received_paise, policy_refund_paise, refund_paise, above_policy_reason, payee_name, account_no, ifsc, bank_name, requested_by)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      id("rfr"), property.id, bookingId, refundApprovalId, refund.reason_code, refund.reason_note ?? null, q.days_before_arrival, q.paid_paise, q.charges_paise, q.net_received_paise, q.policy_refund_paise, refund.refund_paise,
-      refund.refund_paise > q.policy_refund_paise ? refund.above_policy_reason ?? null : null, payee.payee_name, payee.account_no, payee.ifsc, payee.bank_name, actor.id);
+    refundApprovalId = await addRefundRequest(b, property, actor, bookingId, guestName, refund, q);
   } else if (paid > 0 && !q.ota_collected && newStatus === "cancelled") {
     // A cancellation that arrived by email (no one to ask): the revenue desk gets it, flagged, to collect the details.
     refundApprovalId = id("apr");
@@ -267,6 +255,48 @@ export async function cancelBooking(db: D1Database, actor: Actor, property: Prop
   // A no-show pays the cancellation fee: no refund unless the desk asks for one with its reason.
   await b.run();
   return { status: newStatus, paidPaise: paid, refundApprovalId };
+}
+
+/**
+ * Record a refund request whole (why, what was received after charges, the policy, the amount, the bank account) and,
+ * when money is owed, put it in front of the revenue desk to approve. Returns the approval's id, or null for no refund.
+ */
+export async function addRefundRequest(b: Batch, property: PropertyRow, actor: Actor, bookingId: string, guestName: string, refund: RefundInput, q: Awaited<ReturnType<typeof refundQuote>>): Promise<string | null> {
+  const payee = checkRefund(refund, q);
+  let approvalId: string | null = null;
+  if (refund.refund_paise > 0) {
+    approvalId = id("apr");
+    b.add("INSERT INTO approvals (id, property_id, kind, ref_id, summary, amount_paise, status, requested_by, note) VALUES (?,?,?,?,?,?,?,?,?)",
+      approvalId, property.id, "refund", bookingId, `Refund ${(refund.refund_paise / 100).toLocaleString("en-IN")} · ${guestName} · ${REASON_LABEL[refund.reason_code]}${refund.reason_note ? `: ${refund.reason_note}` : ""}`, refund.refund_paise, "pending", actor.id,
+      refund.refund_paise > q.policy_refund_paise ? `above policy: ${refund.above_policy_reason}` : q.rule);
+    await notifyRole(b, property.id, "revenue", "approval_pending", `Refund of ${refund.refund_paise / 100} awaiting approval: ${guestName} (${REASON_LABEL[refund.reason_code]})`, { kind: "booking", id: bookingId });
+  }
+  b.add(`INSERT INTO refund_requests (id, property_id, booking_id, approval_id, reason_code, reason_note, days_before_arrival, paid_paise, charges_paise, net_received_paise, policy_refund_paise, refund_paise, above_policy_reason, payee_name, account_no, ifsc, bank_name, requested_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    id("rfr"), property.id, bookingId, approvalId, refund.reason_code, refund.reason_note ?? null, q.days_before_arrival, q.paid_paise, q.charges_paise, q.net_received_paise, q.policy_refund_paise, refund.refund_paise,
+    refund.refund_paise > q.policy_refund_paise ? refund.above_policy_reason ?? null : null, payee.payee_name, payee.account_no, payee.ifsc, payee.bank_name, actor.id);
+  return approvalId;
+}
+
+/**
+ * A stay already cancelled (or a no-show) whose refund was never asked for properly: the desk asks now, with the same
+ * reason, amount and bank account as at cancellation. Refused while another refund for it is still open.
+ */
+export async function requestRefund(db: D1Database, actor: Actor, property: PropertyRow, bookingId: string, refund: RefundInput) {
+  const bk = await loadBooking(db, property.id, bookingId);
+  if (!["cancelled", "no_show"].includes(bk.status)) throw new HttpError(409, "a refund is asked when the booking is cancelled; cancel it first");
+  const open = await one<{ id: string }>(db, `SELECT a.id FROM approvals a WHERE a.property_id = ? AND a.kind = 'refund' AND a.ref_id = ? AND (a.status = 'pending'
+      OR (a.status = 'approved' AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.refund_approval_id = a.id AND p.status != 'void')))`, property.id, bk.id);
+  if (open) throw new HttpError(409, "a refund for this booking is already waiting: approve, return or pay that one first");
+  const q = await refundQuote(db, property, bk.id, refund.reason_code);
+  if (q.ota_collected) throw new HttpError(409, q.rule);
+  if (q.paid_paise <= 0) throw new HttpError(409, "nothing was paid to Meadows on this booking");
+  const guestName = (await one<{ name: string }>(db, "SELECT name FROM guests WHERE id = ?", bk.guest_id))?.name ?? "Guest";
+  const b = new Batch(db, actor);
+  const approvalId = await addRefundRequest(b, property, actor, bk.id, guestName, refund, q);
+  b.audit("refund.request", "booking", bk.id, null, { reason: refund.reason_code, refund_paise: refund.refund_paise, net_received_paise: q.net_received_paise, policy_refund_paise: q.policy_refund_paise, approval_id: approvalId });
+  await b.run();
+  return { refundApprovalId: approvalId, quote: q };
 }
 
 export interface AmendBookingInput {

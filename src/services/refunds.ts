@@ -15,8 +15,10 @@ const HOTEL_REASONS: ReasonCode[] = ["overbooking", "hotel_cancelled"];
 const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 
 export async function refundQuote(db: D1Database, p: PropertyRow, bookingId: string, reason: ReasonCode, today = todayIn(p.timezone)) {
-  const bk = await one<{ id: string; check_in: string; channel_id: string; status: string }>(db, "SELECT id, check_in, channel_id, status FROM bookings WHERE id = ? AND property_id = ?", bookingId, p.id);
+  const bk = await one<{ id: string; check_in: string; channel_id: string; status: string; cancelled_at: string | null }>(db, "SELECT id, check_in, channel_id, status, cancelled_at FROM bookings WHERE id = ? AND property_id = ?", bookingId, p.id);
   if (!bk) throw new HttpError(404, "booking not found");
+  // Already cancelled: the policy counts from the day it was cancelled, not from when the refund is asked.
+  if (["cancelled", "no_show"].includes(bk.status) && bk.cancelled_at) today = todayIn(p.timezone, new Date(bk.cancelled_at));
   const ch = await one<{ collection_type: string; name: string }>(db, "SELECT collection_type, name FROM channels WHERE id = ?", bk.channel_id);
   const pays = await all<{ id: string; method: string; kind: string; amount_paise: number; received_on: string; reference: string | null; charge_paise: number | null }>(db,
     `SELECT p.id, p.method, p.kind, p.amount_paise, p.received_on, p.reference,

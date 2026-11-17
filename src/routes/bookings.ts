@@ -1,7 +1,7 @@
 import { newRouter, requireCap, body, str, optStr, int, date, oneOf } from "../app";
 import { Batch, HttpError, all, one, id, assertPeriodOpen } from "../db";
 import { nowIso, todayIn } from "../domain/dates";
-import { createBooking, cancelBooking, loadBooking, paidOnBooking , amendBooking } from "../services/bookings";
+import { createBooking, cancelBooking, loadBooking, paidOnBooking , amendBooking, requestRefund } from "../services/bookings";
 import { allowed } from "../auth";
 import { formatINR } from "../domain/money";
 import { openCloseouts } from "../services/staah";
@@ -182,6 +182,13 @@ r.post("/:id/cancel", requireCap("bookings_write"), async (c) => {
   }
   const res = await cancelBooking(c.env.DB, c.get("actor"), p, c.req.param("id"), "cancelled", str(x.reason, "reason"), refund);
   return c.json(res);
+});
+/** Ask for a refund on a booking already cancelled (or a no-show): same rules and details as at cancellation. */
+r.post("/:id/refund-request", requireCap("bookings_write"), async (c) => {
+  const x = await body(c);
+  const refund = refundIn(x.refund);
+  if (!refund) throw new HttpError(400, "refund details are required");
+  return c.json(await requestRefund(c.env.DB, c.get("actor"), c.get("property"), c.req.param("id"), refund));
 });
 r.post("/:id/no-show", requireCap("frontdesk"), async (c) => {
   const p = c.get("property"); const x = await body(c).catch(() => ({} as Record<string, unknown>));

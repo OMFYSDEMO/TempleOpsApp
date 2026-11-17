@@ -318,7 +318,7 @@ const REASON_OPTS = [{ value: "guest_cancelled", label: "Guest cancelled" }, { v
  * taken off), what the cancellation policy allows, the refund asked, and the guest's bank account. Refunds go by bank
  * transfer only, and never above what was received; the revenue desk approves, the owner pays.
  */
-function CancelWithRefund({ d, onClose, onDone }: { d: any; onClose: () => void; onDone: () => Promise<void> }) {
+function CancelWithRefund({ d, onClose, onDone, mode = "cancel" }: { d: any; onClose: () => void; onDone: () => Promise<void>; mode?: "cancel" | "request" }) {
   const [f, setF] = useState<any>({ reason_code: "guest_cancelled", reason_note: "", refund: "", above_policy_reason: "", payee_name: "", account_no: "", account_no_confirm: "", ifsc: "", bank_name: "" });
   const q = useLoad(() => get(`/bookings/${d.booking.id}/refund-quote?reason=${f.reason_code}`), [f.reason_code]);
   const quote = q.data;
@@ -329,12 +329,12 @@ function CancelWithRefund({ d, onClose, onDone }: { d: any; onClose: () => void;
   const ok = !!quote && !tooMuch && Number.isFinite(refundPaise) && refundPaise >= 0 && (f.reason_code !== "other" || f.reason_note.trim().length >= 3) && (!above || f.above_policy_reason.trim().length >= 3) && bankOk;
   const reasonText = `${REASON_OPTS.find((o) => o.value === f.reason_code)?.label ?? f.reason_code}${f.reason_note.trim() ? `: ${f.reason_note.trim()}` : ""}`;
   const save = () => run(async () => {
-    await post(`/bookings/${d.booking.id}/cancel`, { reason: reasonText, refund: { reason_code: f.reason_code, reason_note: f.reason_note || null, refund_paise: refundPaise, above_policy_reason: above ? f.above_policy_reason : null,
+    await post(mode === "request" ? `/bookings/${d.booking.id}/refund-request` : `/bookings/${d.booking.id}/cancel`, { reason: reasonText, refund: { reason_code: f.reason_code, reason_note: f.reason_note || null, refund_paise: refundPaise, above_policy_reason: above ? f.above_policy_reason : null,
       payee_name: f.payee_name, account_no: f.account_no, account_no_confirm: f.account_no_confirm, ifsc: f.ifsc.trim().toUpperCase(), bank_name: f.bank_name || null } });
     await onDone();
-  }, refundPaise > 0 ? `Cancelled · refund of ${inr(refundPaise)} sent to the revenue desk` : "Cancelled · no refund");
+  }, mode === "request" ? (refundPaise > 0 ? `Refund of ${inr(refundPaise)} sent to the revenue desk` : "Recorded · no refund") : refundPaise > 0 ? `Cancelled · refund of ${inr(refundPaise)} sent to the revenue desk` : "Cancelled · no refund");
   return <div className="amend">
-    <div className="sectionhead"><b>Cancel with refund</b><span className="sub">the guest has paid: say why, check what we received, and take their bank account. Refunds go by bank transfer only</span></div>
+    <div className="sectionhead"><b>{mode === "request" ? "Request refund" : "Cancel with refund"}</b><span className="sub">the guest has paid: say why, check what we received, and take their bank account. Refunds go by bank transfer only</span></div>
     <Chips label="Reason" value={f.reason_code} options={REASON_OPTS} onChange={(v) => setF({ ...f, reason_code: v, refund: "" })} />
     <Field label={f.reason_code === "other" ? "What happened (required)" : "Note (optional)"}><input value={f.reason_note} onChange={(e: any) => setF({ ...f, reason_note: e.currentTarget.value })} placeholder="e.g. guest's flight cancelled" /></Field>
     {!quote ? <Loading error={q.error} /> : <>
@@ -354,7 +354,7 @@ function CancelWithRefund({ d, onClose, onDone }: { d: any; onClose: () => void;
         <Field label="IFSC" hint="e.g. HDFC0001234"><input value={f.ifsc} onChange={(e: any) => setF({ ...f, ifsc: e.currentTarget.value.toUpperCase() })} /></Field>
       </div>}
     </>}
-    <div className="actions end"><Btn onClick={onClose}>Keep booking</Btn><Btn kind="danger" disabled={!ok} onClick={save}>Cancel booking{refundPaise > 0 ? ` · refund ${inr(refundPaise)}` : " · no refund"}</Btn></div>
+    <div className="actions end"><Btn onClick={onClose}>{mode === "request" ? "Close" : "Keep booking"}</Btn><Btn kind={mode === "request" ? "primary" : "danger"} disabled={!ok} onClick={save}>{mode === "request" ? (refundPaise > 0 ? `Request refund · ${inr(refundPaise)}` : "Record · no refund") : `Cancel booking${refundPaise > 0 ? ` · refund ${inr(refundPaise)}` : " · no refund"}`}</Btn></div>
   </div>;
 }
 
@@ -365,7 +365,10 @@ function BookingDetail({ me, refs, d, rooms, tariffFor, onChange, onClose }: { m
   const guests = `${b.adults} adult${b.adults > 1 ? "s" : ""}${b.children ? `, ${b.children} child${b.children > 1 ? "ren" : ""}` : ""}`;
   const [refundOpen, setRefundOpen] = useState(false);
   const needsRefund = d.paid_paise > 0 && d.channel.collection_type !== "channel_collect";
-  const cancel = async () => { if (needsRefund) { setRefundOpen(true); return; } const reason = await askText(`Cancel ${d.guest?.name ?? "this booking"}'s booking?`, "Cancellation reason", { ok: "Cancel booking", cancel: "Keep booking", danger: true, body: "The rooms are released at once." }); if (reason) await run(async () => { await post(`/bookings/${b.id}/cancel`, { reason }); await onChange(); }, "Cancelled · rooms released"); };
+  const [refundMode, setRefundMode] = useState<"cancel" | "request">("cancel");
+  const openRefund = (d.approvals ?? []).some((a: any) => a.kind === "refund" && (a.status === "pending" || (a.status === "approved" && !(d.payments ?? []).some((p: any) => p.refund_approval_id === a.id && p.status !== "void"))));
+  const canRequestRefund = ["cancelled", "no_show"].includes(b.status) && needsRefund && !openRefund && me.capabilities.includes("bookings_write");
+  const cancel = async () => { if (needsRefund) { setRefundMode("cancel"); setRefundOpen(true); return; } const reason = await askText(`Cancel ${d.guest?.name ?? "this booking"}'s booking?`, "Cancellation reason", { ok: "Cancel booking", cancel: "Keep booking", danger: true, body: "The rooms are released at once." }); if (reason) await run(async () => { await post(`/bookings/${b.id}/cancel`, { reason }); await onChange(); }, "Cancelled · rooms released"); };
   const remove = async () => { if (await askConfirm(`Delete ${d.guest?.name ?? "this"} booking?`, "Use this only for a booking made by mistake. Nothing has been paid on it, so it leaves no trace in the books.", { ok: "Delete", danger: true })) await run(async () => { await del(`/bookings/${b.id}`); onClose(); await onChange(); }, "Deleted"); };
   return <div className="detail">
     <div className="detailhead">
@@ -379,7 +382,8 @@ function BookingDetail({ me, refs, d, rooms, tariffFor, onChange, onClose }: { m
         {["provisional", "approved"].includes(b.status) && <Btn kind="danger" onClick={cancel}>Cancel booking</Btn>}
       </div>
     </div>
-    {refundOpen && <CancelWithRefund d={d} onClose={() => setRefundOpen(false)} onDone={async () => { setRefundOpen(false); await onChange(); }} />}
+    {canRequestRefund && !refundOpen && <div className="note" role="status">{b.status === "no_show" ? "No-show" : "Cancelled"} with {inr(d.paid_paise)} paid and no refund asked for. <Btn small kind="primary" onClick={() => { setRefundMode("request"); setRefundOpen(true); }}>Request refund</Btn></div>}
+    {refundOpen && <CancelWithRefund mode={refundMode} d={d} onClose={() => setRefundOpen(false)} onDone={async () => { setRefundOpen(false); await onChange(); }} />}
     <div className="detailgrid">
       <div>
         <div className="facts">
