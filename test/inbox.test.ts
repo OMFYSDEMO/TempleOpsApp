@@ -218,11 +218,11 @@ describe("Inbox automation", () => {
     const ing = await ok("prachi", "POST", "/api/inbox/ingest", { from: "bookings@meadowsvarkala.com", subject: "Fwd: New Reservation Goibibo for kumar Reservation No:0190589681 (1060900000001400) - The Meadows Varkala", text });
     expect(ing.parsed.source).toBe("staah"); expect(ing.parsed.kind).toBe("new_reservation");
     expect(ing.parsed.external_ref).toBe("1060900000001400"); expect(ing.parsed.data.ota_ref).toBe("0190589681");
-    expect(ing.parsed.data).toMatchObject({ channel: "Goibibo", guest_name: "saurav kumar", room_name: "Premium", rooms: 1, nights: 2, adults: 2, children: 1, check_in: "2027-01-20", check_out: "2027-01-22", room_total_paise: 1170450, taxes_paise: 68850, total_incl_gst_paise: 1239300, commission_paise: 243729, collection_type: "channel_collect" });
+    expect(ing.parsed.data).toMatchObject({ channel: "Goibibo", guest_name: "saurav kumar", room_name: "Premium", rooms: 1, nights: 2, adults: 2, children: 1, check_in: "2027-01-20", check_out: "2027-01-22", room_total_paise: 1377000, room_total_net_paise: 1170450, taxes_paise: 68850, total_incl_gst_paise: 1445850, commission_paise: 243729, collection_type: "channel_collect" });
     expect(ing.parsed.confidence).toBe("high");
     expect(ing.status).toBe("approved"); expect(ing.auto.what).toBe("booked");
     const bk = (await sql("SELECT channel_id, room_total_paise, external_ref FROM bookings WHERE id = ?", ing.booking_id))[0] as any;
-    expect(bk.channel_id).toBe("ch_goibibo"); expect(bk.room_total_paise).toBe(1170450); expect(bk.external_ref).toBe("1060900000001400 (0190589681)");
+    expect(bk.channel_id).toBe("ch_goibibo"); expect(bk.room_total_paise).toBe(1377000); expect(bk.external_ref).toBe("1060900000001400 (0190589681)");
     expect((await sql("SELECT room_id FROM room_nights WHERE booking_id = ?", ing.booking_id))[0].room_id).toBe("loc_r2");
     // Re-reading a waiting card re-runs the parser and automation; a done card is left alone.
     expect((await api("prachi", "POST", `/api/inbox/${ing.id}/reparse`)).status).toBe(409);
@@ -454,5 +454,21 @@ describe("booking engine · cancellation of a stay still awaiting approval", () 
     expect(apr.status).toBe("returned"); expect(apr.note).toMatch(/booking cancelled/);
     expect((await ok("trupti", "GET", "/api/work")).items.find((i: any) => i.key === `approval:${ing.booking_id}`)).toBeUndefined();
     expect((await ok("trupti", "GET", "/api/approvals")).approvals.find((a: any) => a.ref_id === ing.booking_id)).toBeUndefined();
+  });
+});
+
+describe("STAAH: Go-MMT room totals are printed after commission", () => {
+  it("adds the commission (before its GST) back when the taxes fit the grossed-up room charge, and only then", async () => {
+    const { netOfCommission } = await import("../src/email/parsers");
+    // saurav kumar (Goibibo): Room Total 11,704.50 after commission, taxes 688.50 = 5% of 13,770, commission 2,437.29 incl. GST.
+    expect(netOfCommission("11,704.50", "688.50", "2,437.29")).toBe(1377000);
+    // Padmini Borah (Goibibo): 24,480 + 5,097.60/1.18 = 28,800; taxes 1,440 = 5%.
+    expect(netOfCommission("24,480.00", "1,440.00", "5,097.60")).toBe(2880000);
+    // Avishek Chakraborty (Goibibo, 18% slab): 22,238.54 + 4,630.86/1.18 = 26,163; taxes 4,709.34 = 18%.
+    expect(netOfCommission("22,238.54", "4,709.34", "4,630.86")).toBe(2616300);
+    // Booking.com / Yatra print the full room charge: taxes already fit the Room Total, nothing changes.
+    expect(netOfCommission("52,706.26", "9,487.13", "9,486.26")).toBeNull();
+    expect(netOfCommission("6,650.00", "333.00", "1,330.00")).toBeNull();
+    expect(netOfCommission("6,650.00", null, "1,330.00")).toBeNull();
   });
 });

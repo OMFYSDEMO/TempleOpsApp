@@ -1,7 +1,7 @@
 import { rupeesToPaise } from "../domain/money";
 import { parseLooseDate } from "../domain/dates";
 
-export const PARSER_VERSION = "2026-11-05c";
+export const PARSER_VERSION = "2026-11-19a";
 
 /** "Villa", "Entire villa", "Whole villa", "Full villa": the booking engine's name for all rooms together. */
 export const isWholeVilla = (roomName: unknown) => /^(the\s+)?(entire|whole|full|complete|exclusive)?\s*villa\b/i.test(String(roomName ?? "").trim());
@@ -46,6 +46,19 @@ export function forwardedPart(body: string): string {
 }
 
 /** Amount after a label, e.g. "Room Total : INR 11,704.50" or "Total: ₹6,000". */
+/**
+ * The guest's room charge (paise) when a STAAH email prints the Room Total net of the OTA's commission, else null.
+ * Net when Total Taxes is GST (5%, 12% or 18%) on Room Total + Commission/1.18 and not on Room Total itself.
+ */
+export function netOfCommission(roomTotal: string | null, taxes: string | null, commission: string | null): number | null {
+  if (!roomTotal || !taxes || !commission) return null;
+  const room = rupeesToPaise(roomTotal), tax = rupeesToPaise(taxes), comm = rupeesToPaise(commission);
+  if (!(room > 0 && tax > 0 && comm > 0)) return null;
+  const gross = room + Math.round(comm / 1.18);
+  const fits = (base: number) => [500, 1200, 1800].some((bp) => Math.abs(Math.round((base * bp) / 10_000) - tax) <= 200);
+  return fits(gross) && !fits(room) ? gross : null;
+}
+
 function money(body: string, label: string): string | null {
   return grab(body, new RegExp(label + "\\s*:?\\s*(?:₹|INR|Rs\\.?)?\\s*([\\d,]+(?:\\.\\d+)?)", "i"));
 }
@@ -120,6 +133,10 @@ export function parseStaah(rawSubject: string, body: string, year: number): Pars
   const commissionPct = grab(body, /Commission\s*:?\s*([\d.]+)\s*%/i);
   const commissionAmt = commissionPct ? null : money(body, "Commission");
   const collect = /channel collect|prepaid|paid online|virtual card/i.test(body) ? "channel_collect" : /hotel collect|pay at (?:hotel|property)/i.test(body) ? "hotel_collect" : null;
+  // MakeMyTrip / Goibibo (Go-MMT) print the Room Total after their commission, while Total Taxes is GST on the full room
+  // charges and Commission includes its 18% GST. The guest's room charge is the Room Total plus the commission before GST.
+  // Recognised by the arithmetic, not the channel name: GST fits the grossed-up total and not the printed one.
+  const grossRoom = netOfCommission(roomTotal, taxes, commissionAmt);
   const data = {
     channel, ota_ref: otaRef, vendor: grab(body, /VendorName\s*::?\s*([A-Za-z.\- ]+?)\s*(?:,|\n|$)/i), guest_name: guest, room_name: room, room_name_full: roomFull, rooms: roomsN, nights: nightsN,
     // Several room types: every one is listed, with its count and its share of the price.
@@ -127,8 +144,10 @@ export function parseStaah(rawSubject: string, body: string, year: number): Pars
     adults: (roomTypes.length > 1 ? sumOf("adults") : null) ?? (Number(grab(body, /ADULTS\s*\n?\s*(\d+)/i) ?? "0") || null),
     children: (roomTypes.length > 1 ? sumOf("children") || null : null) ?? (Number(grab(body, /CHILDREN\s*\n?\s*(\d+)/i) ?? "0") || null),
     check_in: checkIn, check_out: checkOut,
-    room_total_paise: roomTotal ? rupeesToPaise(roomTotal) : null, room_total_is_ex_gst: taxes !== null || /ex[- ]?GST|excl/i.test(body),
-    taxes_paise: taxes ? rupeesToPaise(taxes) : null, total_incl_gst_paise: totalIncl ? rupeesToPaise(totalIncl) : null,
+    room_total_paise: grossRoom !== null ? grossRoom : roomTotal ? rupeesToPaise(roomTotal) : null, room_total_is_ex_gst: taxes !== null || /ex[- ]?GST|excl/i.test(body),
+    ...(grossRoom !== null ? { room_total_net_paise: rupeesToPaise(roomTotal!), room_total_grossed_up: true } : {}),
+    taxes_paise: taxes ? rupeesToPaise(taxes) : null,
+    total_incl_gst_paise: grossRoom !== null && taxes ? grossRoom + rupeesToPaise(taxes) : totalIncl ? rupeesToPaise(totalIncl) : null,
     commission_bp: commissionPct ? Math.round(Number(commissionPct) * 100) : null, commission_paise: commissionAmt ? rupeesToPaise(commissionAmt) : null,
     collection_type: collect, status_text: grab(body, /Bookings?\s*Status\s*:?\s*([A-Za-z ]+?)\s*(?:\n|$)/i),
   };
