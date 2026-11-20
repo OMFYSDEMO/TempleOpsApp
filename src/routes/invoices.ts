@@ -27,6 +27,49 @@ r.get("/", async (c) => {
   return c.json({ invoices: rows });
 });
 
+/**
+ * Credit notes for the accountant: every one in full (number, date, the invoice it reduces and when that was issued,
+ * guest, taxable value, GST and its rate, total, reason, any refund paid against it, who issued it), by month.
+ */
+r.get("/credit-notes", async (c) => {
+  const p = c.get("property");
+  const period = c.req.query("period");
+  const rows = await all(c.env.DB, `SELECT cn.id, cn.number, cn.fy, cn.issued_on, cn.taxable_paise, cn.gst_paise, cn.total_paise, cn.reason, cn.created_at,
+       i.id AS invoice_id, i.number AS invoice_number, i.issued_on AS invoice_date, i.total_paise AS invoice_total_paise, i.guest_name, i.guest_gstin, i.gst_applicable,
+       CASE WHEN cn.taxable_paise > 0 THEN ROUND(cn.gst_paise * 10000.0 / cn.taxable_paise) ELSE 0 END AS gst_rate_bp,
+       u.name AS issued_by_name, pm.amount_paise AS refund_paise, pm.reference AS refund_reference, pm.received_on AS refund_on
+     FROM credit_notes cn JOIN invoices i ON i.id = cn.invoice_id LEFT JOIN users u ON u.id = cn.issued_by LEFT JOIN payments pm ON pm.id = cn.refund_payment_id
+     WHERE cn.property_id = ? ${period ? "AND substr(cn.issued_on,1,7) = ?" : ""} ORDER BY cn.fy DESC, cn.seq DESC LIMIT 300`, ...(period ? [p.id, period] : [p.id]));
+  return c.json({ credit_notes: rows });
+});
+
+/** A credit note as a document: printable like the invoice it reduces. */
+r.get("/credit-notes/:cid/html", async (c) => {
+  const p = c.get("property");
+  const cn: any = await one(c.env.DB, "SELECT * FROM credit_notes WHERE id = ? AND property_id = ?", c.req.param("cid"), p.id);
+  if (!cn) throw new HttpError(404, "credit note not found");
+  const inv: any = await one(c.env.DB, "SELECT * FROM invoices WHERE id = ?", cn.invoice_id);
+  const lines: InvoiceLine[] = JSON.parse(inv.lines_json);
+  const refund = cn.refund_payment_id ? await one<any>(c.env.DB, "SELECT amount_paise, reference, received_on, method FROM payments WHERE id = ?", cn.refund_payment_id) : null;
+  const rate = cn.taxable_paise > 0 ? Math.round((cn.gst_paise * 10000) / cn.taxable_paise) / 100 : 0;
+  const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]!));
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(cn.number)}</title>
+<style>body{font:14px/1.45 -apple-system,Segoe UI,sans-serif;color:#1C2420;margin:32px;max-width:720px}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:20px 0 4px}.muted{color:#5a615c}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #DDD8CB}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}.tot td{font-weight:700;border-top:2px solid #14453A}.hdr{display:flex;justify-content:space-between;gap:24px}.box{border:1px solid #DDD8CB;padding:12px;border-radius:8px}@media print{body{margin:12mm}}</style></head><body>
+<div class="hdr"><div><h1>${esc(p.legal_name || p.name)}</h1><div class="muted">${esc(p.address ?? "")}</div><div class="muted">${inv.gst_applicable ? "GSTIN " + esc(p.gstin) : "GST not applicable — unregistered supplier"}</div></div>
+<div class="box"><div><b>Credit Note</b> ${esc(cn.number)}</div><div>Date ${esc(cn.issued_on)}</div><div class="muted">FY ${esc(cn.fy)}</div></div></div>
+<p><b>Against ${inv.gst_applicable ? "tax invoice" : "invoice"}</b> ${esc(inv.number)} dated ${esc(inv.issued_on)} · invoice total ${formatINR(inv.total_paise)}<br><b>Guest</b> ${esc(inv.guest_name)}${inv.guest_gstin ? " · GSTIN " + esc(inv.guest_gstin) : ""}</p>
+<p><b>Reason</b> ${esc(cn.reason)}</p>
+<table><thead><tr><th>Credited</th><th class="n">Taxable</th>${inv.gst_applicable ? '<th class="n">GST</th>' : ""}<th class="n">Amount</th></tr></thead><tbody>
+<tr><td>Accommodation (SAC 9963)${inv.gst_applicable ? ` <span class="muted">· GST ${rate}%</span>` : ""}</td><td class="n">${formatINR(cn.taxable_paise)}</td>${inv.gst_applicable ? `<td class="n">${formatINR(cn.gst_paise)}</td>` : ""}<td class="n">${formatINR(cn.total_paise)}</td></tr>
+<tr class="tot"><td>Total credited</td><td class="n">${formatINR(cn.taxable_paise)}</td>${inv.gst_applicable ? `<td class="n">${formatINR(cn.gst_paise)}</td>` : ""}<td class="n">${formatINR(cn.total_paise)}</td></tr></tbody></table>
+${refund ? `<p>Refund paid ${formatINR(refund.amount_paise)} by ${esc(refund.method)} on ${esc(refund.received_on)}${refund.reference ? ` · ref ${esc(refund.reference)}` : ""}</p>` : ""}
+<h2>Original invoice ${esc(inv.number)}</h2>
+<table><thead><tr><th>Description</th><th class="n">Taxable</th>${inv.gst_applicable ? '<th class="n">GST</th>' : ""}</tr></thead><tbody>
+${lines.map((l) => `<tr><td>${esc(l.description)}${inv.gst_applicable ? ` <span class="muted">(${l.gst_rate_bp / 100}%)</span>` : ""}</td><td class="n">${formatINR(l.taxable_paise)}</td>${inv.gst_applicable ? `<td class="n">${formatINR(l.gst_paise)}</td>` : ""}</tr>`).join("")}
+</tbody></table></body></html>`;
+  return c.html(html);
+});
+
 r.get("/:id", async (c) => {
   const p = c.get("property");
   const inv: any = await one(c.env.DB, "SELECT * FROM invoices WHERE id = ? AND property_id = ?", c.req.param("id"), p.id);
